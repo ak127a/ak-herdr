@@ -8,7 +8,7 @@ app=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
 os=${HERDR_SETUP_OS:-$(uname -s)}
 mac_mod=${MAC_MOD:-cmd}
 
-MODS="sidebar-tree tabs-clean space-picker tmux-navigation"
+MODS="sidebar-tree tabs-clean space-picker"
 
 # install.sh rewrites alt-* to $MAC_MOD-* on macOS; turn it back so the repo
 # keeps one canonical file with Alt shortcuts.

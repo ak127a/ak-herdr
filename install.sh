@@ -11,7 +11,7 @@ stamp=$(date +%Y%m%d-%H%M%S)
 
 say() { printf '%s\n' "$*"; }
 
-MODS="sidebar-tree tabs-clean space-picker tmux-navigation"
+MODS="sidebar-tree tabs-clean space-picker"
 
 backup() {
   [ -e "$1" ] || return 0

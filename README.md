@@ -5,30 +5,27 @@ spaces-and-agents sidebar, and one key that takes you to whichever agent
 needs you.
 
 ```
-┌ sidebar ─────────────┬ tabs ─────────────────────────────┐
-│ .config              │ 1  Pi   2  3   4  5 !             │
-│   ▾ agents           │                                   │
-│     opencode · working                                   │
-│     claude   · Needs you                                 │
-│   anotherone         │            panes                  │
-├──────────────────────┴───────────────────────────────────┤
-│ This computer  6 agents · 1 needs you        commands    │
-└──────────────────────────────────────────────────────────┘
+┌ sidebar ─────────────────┬ tabs  1 Pi  2  3  4  5 ! ─────┐
+│ .config                  │                              │
+│   ▾ agents               │                              │
+│     opencode · working   │           panes              │
+│     claude · Needs you   │                              │
+│   anotherone             │                              │
+└──────────────────────────┴──────────────────────────────┘
 ```
 
 ## What you get
 
 - **`layouts/tmux.json`** — sidebar with spaces and their agents nested under
-  them, clean tab pills, optional Files/Changes panel, one-line status bar.
+  them, clean tab pills, optional Files/Changes panel, no pane headers and no
+  status bar: the terminals get the whole window.
 - **`mods/sidebar-tree`** — the sidebar: spaces with agents under them, most
   recently used first, sub-agents under their parent, status dots and
-  "Needs you" marks, click to go.
+  "Needs you" marks, click to go. It also owns the `Alt+J` agent jump and the
+  `last_agent` / `last_tab` / `last_space` keys.
 - **`mods/tabs-clean`** — tab pills with program icons, agent status,
   per-tab close buttons.
 - **`mods/space-picker`** — fuzzy space picker (`prefix + q`).
-- **`mods/tmux-navigation`** — the status bar: machine, git branch, agent
-  count, "needs you" count (click it to jump), palette hint; also backs the
-  `last_agent` / `last_tab` / `last_space` keys.
 - **`keys.json`** — tmux-style `Ctrl+Space` prefix plus direct keys, and
   `Alt+J` to jump to the agent that needs you.
 
@@ -57,8 +54,8 @@ you can also pick it with `Ctrl+Shift+L` or the command palette.
 - most recent first inside each group.
 
 Press it again to walk through the rest of them; it wraps around. When nothing
-needs you it says so in a toast. Clicking the `· N needs you` counter in the
-status bar does the same thing.
+needs you it says so in a toast. The sidebar marks the same agents with a
+"Needs you" badge.
 
 ## Shortcuts
 
@@ -144,11 +141,10 @@ Linux/Windows spelling.
 
 ```
 keys.json                 shortcuts
-layouts/tmux.json         the window
-mods/sidebar-tree/        spaces + agents sidebar
+layouts/tmux.json         the window (no pane headers, no status bar)
+mods/sidebar-tree/        spaces + agents sidebar, Alt+J jump, last-* keys
 mods/tabs-clean/          tab pills
 mods/space-picker/        prefix + q
-mods/tmux-navigation/     status bar, agent jump, last-* keys
 ```
 
 Shipped Herdr mods (`workspace-chrome`, `pane`, `files`, `changes`, `picker`)
@@ -164,5 +160,5 @@ After changing the setup in Herdr:
 
 ```sh
 ./sync.sh
-git commit -am "tweak the status bar" && git push
+git commit -am "tweak the sidebar" && git push
 ```

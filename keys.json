@@ -122,10 +122,10 @@
     "ctrl-space ctrl-space": "send:\u0000"
   },
   "layout:tmux": {
-    "ctrl-space a": "tmux-navigation.last_agent",
-    "alt-j": "tmux-navigation.needs_you",
-    "ctrl-space l": "tmux-navigation.last_tab",
-    "ctrl-space shift-l": "tmux-navigation.last_space",
-    "ctrl-space shift-p": "tmux-navigation.start_pi"
+    "ctrl-space a": "sidebar-tree.last_agent",
+    "alt-j": "sidebar-tree.needs_you",
+    "ctrl-space l": "sidebar-tree.last_tab",
+    "ctrl-space shift-l": "sidebar-tree.last_space",
+    "ctrl-space shift-p": "sidebar-tree.start_pi"
   }
 }

@@ -6,8 +6,10 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import {
   agents, terminals, focused, spaces, run, theme, shared, setShared,
-  setAgentOrder, openOverlay, window, layout,
+  setAgentOrder, openOverlay, window, layout, notify, nextCommand,
 } from "herdr";
+import { NavigationHistory, AgentHistory } from "./history.js";
+import { TabOrder } from "./tab-order.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -76,6 +78,63 @@ export default class SidebarTree extends View {
     this.activeAt = -1;
     this.scroll = ScrollHandle.new();
     cx.timer.every(30000, (cx) => cx.notify());
+
+    // Navigation history, the agent jump and the order new tabs land in: the
+    // layout has no status bar to host these, the sidebar is always shown.
+    this.history = new NavigationHistory();
+    this.history.observe(spaces());
+    this.agentHistory = new AgentHistory();
+    this.agentHistory.observe(agents(), focused());
+    this.tabOrder = new TabOrder();
+    this.tabOrder.observe(spaces());
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const command = await nextCommand();
+        if (command === "start_pi") {
+          run("tab.new", { name: "Pi", argv: ["pi"] });
+          continue;
+        }
+        if (command === "needs_you") {
+          this.jumpToNeedsYou();
+          cx.notify();
+          continue;
+        }
+        if (command === "last_agent") {
+          const terminal = this.agentHistory.target(agents(), focused());
+          if (terminal) run("agent.focus", { terminal });
+          else notify({ title: "No previous agent yet", level: "info" });
+          cx.notify();
+          continue;
+        }
+        if (command !== "last_tab" && command !== "last_space") continue;
+        const id = this.history.target(command, spaces());
+        if (id) run(command === "last_space" ? "space.select" : "tab.select", { id });
+        else notify({ title: command === "last_space" ? "No previous space yet" : "No previous tab in this space yet", level: "info" });
+        cx.notify();
+      }
+    });
+  }
+
+  // The agents waiting on a person: blocked (needs typing) first, then the
+  // ones that finished while away, most recent first inside each group.
+  waitingOnMe() {
+    return agents()
+      .filter(a => a.status === "blocked" || a.status === "done")
+      .sort((a, b) => (b.status === "blocked") - (a.status === "blocked") || b.seq - a.seq);
+  }
+
+  // Go to the agent that needs the person: the first press takes the most
+  // urgent one, pressing again walks the rest of them and wraps around.
+  jumpToNeedsYou() {
+    const waiting = this.waitingOnMe();
+    if (!waiting.length) {
+      notify({ title: "No agent needs you", body: "Every agent is working or idle", level: "info" });
+      return;
+    }
+    const at = waiting.findIndex(a => a.address === this.needsYouAt);
+    const next = waiting[(at + 1) % waiting.length];
+    this.needsYouAt = next.address;
+    run("agent.focus", { terminal: next.address });
   }
 
   saveFolded() {
@@ -162,6 +221,10 @@ export default class SidebarTree extends View {
   }
 
   render() {
+    // Append newly seen tabs from any creation path; leave existing tabs alone.
+    for (const move of this.tabOrder.observe(spaces())) run("tab.move", move);
+    this.history.observe(spaces());
+    this.agentHistory.observe(agents(), focused());
     const t = theme();
     const collapsed = narrow();
     const now = Date.now();

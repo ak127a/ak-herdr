@@ -85,14 +85,6 @@
               "content": {
                 "tab": "active",
                 "pane": {
-                  "header": {
-                    "content": {
-                      "mod": "pane"
-                    },
-                    "reveal": "always",
-                    "height": 26,
-                    "position": "top"
-                  },
                   "background": "background",
                   "border": {
                     "width": 1,
@@ -144,16 +136,6 @@
           ],
           "padding": 4,
           "gap": 6
-        },
-        {
-          "id": "status",
-          "type": "block",
-          "content": {
-            "mod": "tmux-navigation"
-          },
-          "size": {
-            "px": 28
-          }
         }
       ],
       "resizable": false
