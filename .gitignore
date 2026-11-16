@@ -1,0 +1,5 @@
+# Files Herdr generates inside mod folders; install.sh and sync.sh skip them.
+*.d.ts
+jsconfig.json
+*.error
+*.bak-*
