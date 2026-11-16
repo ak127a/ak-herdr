@@ -10,10 +10,13 @@ mac_mod=${MAC_MOD:-cmd}
 
 MODS="sidebar-tree tabs-clean space-picker"
 
-# install.sh rewrites alt-* to $MAC_MOD-* on macOS; turn it back so the repo
-# keeps one canonical file with Alt shortcuts.
+# install.sh rewrites alt-* to $MAC_MOD-* on macOS and adds Cmd+C/V/A; undo
+# both so the repo keeps one canonical file with Alt shortcuts.
 if [ "$os" = "Darwin" ]; then
-  sed "s/\"$mac_mod-/\"alt-/g" "$app/keys.json" > "$here/keys.json"
+  sed -e '/^    "cmd-v": "terminal\.paste",$/d' \
+      -e '/^    "cmd-c": "terminal\.copy",$/d' \
+      -e '/^    "cmd-a": "terminal\.select_all",$/d' \
+      -e "s/\"$mac_mod-/\"alt-/g" "$app/keys.json" > "$here/keys.json"
 else
   cp "$app/keys.json" "$here/keys.json"
 fi
@@ -30,5 +33,10 @@ for m in $MODS; do
     cp -R "$f" "$here/mods/$m/"
   done
 done
+
+if [ -f "$HOME/.local/bin/opencode-herdr" ]; then
+  mkdir -p "$here/bin"
+  cp "$HOME/.local/bin/opencode-herdr" "$here/bin/opencode-herdr"
+fi
 
 printf 'synced %s -> %s\n' "$app" "$here"

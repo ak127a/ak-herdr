@@ -24,10 +24,19 @@ command -v herdr-app >/dev/null 2>&1 || say "note: herdr-app is not on PATH; cop
 mkdir -p "$app/layouts" "$app/mods"
 
 # keys.json is written for Linux and Windows, where the modifier is Alt.
-# On macOS Alt types characters: the scripts use Cmd there instead (MAC_MOD=...).
+# On macOS Alt types characters: the scripts use Cmd there instead (MAC_MOD=...),
+# and the terminal gets the Cmd+V / Cmd+C / Cmd+A a Mac user expects.
 if [ "$os" = "Darwin" ]; then
-  sed "s/\"alt-/\"$mac_mod-/g" "$here/keys.json" > "$app/keys.json.new"
-  say "keys    alt-* as $mac_mod-* (macOS)"
+  sed "s/\"alt-/\"$mac_mod-/g" "$here/keys.json" |
+    awk '/^  "terminal": \{$/ {
+           print
+           print "    \"cmd-v\": \"terminal.paste\","
+           print "    \"cmd-c\": \"terminal.copy\","
+           print "    \"cmd-a\": \"terminal.select_all\","
+           next
+         }
+         { print }' > "$app/keys.json.new"
+  say "keys    alt-* as $mac_mod-*, terminal cmd-v/c/a (macOS)"
 else
   cp "$here/keys.json" "$app/keys.json.new"
   say "keys    alt-* as alt-*"
@@ -45,6 +54,17 @@ for m in $MODS; do
   cp -R "$here/mods/$m" "$app/mods/$m"
   say "mod     mods/$m"
 done
+
+# Ctrl+Space Shift+O runs this wrapper: one OpenCode session per Herdr tab.
+mkdir -p "$HOME/.local/bin"
+cp "$here/bin/opencode-herdr" "$HOME/.local/bin/opencode-herdr"
+chmod +x "$HOME/.local/bin/opencode-herdr"
+say "bin     ~/.local/bin/opencode-herdr"
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) say "note: ~/.local/bin is not on this shell's PATH; add it so Herdr can run opencode-herdr" ;;
+esac
+command -v opencode >/dev/null 2>&1 || say "note: opencode is not on PATH; the opencode-herdr tab needs it"
 
 # Herdr reads these files live, so a running window follows along.
 if command -v herdr-app >/dev/null 2>&1; then

@@ -28,6 +28,10 @@ needs you.
 - **`mods/space-picker`** — fuzzy space picker (`prefix + q`).
 - **`keys.json`** — tmux-style `Ctrl+Space` prefix plus direct keys, and
   `Alt+J` to jump to the agent that needs you.
+- **`bin/opencode-herdr`** — a two-line wrapper that starts `opencode` with
+  `HERDR_ENV=1` (one OpenCode session per Herdr tab). `install.sh` puts it in
+  `~/.local/bin` and `prefix + Shift+O` runs it — keep `~/.local/bin` on your
+  PATH, or the tab says `opencode-herdr: not found`.
 
 ## Install
 
@@ -39,11 +43,12 @@ cd ak-herdr
 ./install.sh
 ```
 
-The script copies `keys.json`, `layouts/tmux.json` and the four mods into
-`~/.config/herdr-app` (or `$HERDR_APP_HOME`), keeping anything it replaces as
-`<name>.bak-<date>`. Herdr reads these files live, so a running window picks
-them up, and the script switches it to the `tmux` layout. On a fresh machine
-you can also pick it with `Ctrl+Shift+L` or the command palette.
+The script copies `keys.json`, `layouts/tmux.json` and the three mods into
+`~/.config/herdr-app` (or `$HERDR_APP_HOME`), and `opencode-herdr` into
+`~/.local/bin`, keeping anything it replaces as `<name>.bak-<date>`. Herdr
+reads these files live, so a running window picks them up, and the script
+switches it to the `tmux` layout. On a fresh machine you can also pick it
+with `Ctrl+Shift+L` or the command palette.
 
 ## Jump to the agent that needs you
 
@@ -102,7 +107,7 @@ needs you it says so in a toast. The sidebar marks the same agents with a
 | `a` | last agent |
 | `l` / `Shift+L` | last tab / last space |
 | `Shift+P` | start `pi` in a new tab |
-| `Shift+O` | new tab running `opencode-herdr` |
+| `Shift+O` | new tab running `opencode-herdr` (needs `opencode` on PATH) |
 
 ### In a terminal
 
@@ -110,6 +115,7 @@ needs you it says so in a toast. The sidebar marks the same agents with a
 | --- | --- |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | copy / paste |
 | `Ctrl+V` | paste an image |
+| `Cmd+C` / `Cmd+V` / `Cmd+A` | copy / paste / select all (macOS only) |
 | `Ctrl+Left` / `Ctrl+Right` | word left / right |
 | `Ctrl+Backspace` | delete word |
 
@@ -118,7 +124,9 @@ needs you it says so in a toast. The sidebar marks the same agents with a
 On macOS the Alt/Option key types characters, so the same shortcuts use
 **Cmd** there. `install.sh` rewrites every `alt-…` key to `cmd-…` while
 copying `keys.json`, so `Alt+J` becomes `Cmd+J`, `Alt+H J K L` become
-`Cmd+H J K L`, and so on.
+`Cmd+H J K L`, and so on. It also adds the Mac terminal habits that a
+custom `keys.json` would otherwise lose: `Cmd+V` paste, `Cmd+C` copy and
+`Cmd+A` select all.
 
 If you want another modifier instead, set it before installing:
 
@@ -134,8 +142,9 @@ Two macOS collisions to know about:
 - `Ctrl+Space` may switch input sources, and `Cmd+Space` is Spotlight. If the
   prefix eats keys, change the `ctrl-space …` bindings in `keys.json`.
 
-`sync.sh` translates `cmd-…` back to `alt-…`, so the repo always stores the
-Linux/Windows spelling.
+`sync.sh` reverses both on macOS — it drops the added `Cmd+V` / `Cmd+C` /
+`Cmd+A` terminal keys and turns `cmd-…` back into `alt-…` — so the repo always
+stores the Linux/Windows spelling.
 
 ## Layout and mods
 
@@ -145,6 +154,7 @@ layouts/tmux.json         the window (no pane headers, no status bar)
 mods/sidebar-tree/        spaces + agents sidebar, Alt+J jump, last-* keys
 mods/tabs-clean/          tab pills
 mods/space-picker/        prefix + q
+bin/opencode-herdr        one OpenCode session per tab (prefix + Shift+O)
 ```
 
 Shipped Herdr mods (`workspace-chrome`, `pane`, `files`, `changes`, `picker`)

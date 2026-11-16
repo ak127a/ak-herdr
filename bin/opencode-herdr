@@ -1,0 +1,7 @@
+#!/bin/sh
+# Launch OpenCode as one session per Herdr terminal/tab.
+# HERDR_ENV=1 tells OpenCode it runs inside Herdr, which keeps its in-TUI
+# session tabs off; each Herdr tab is then exactly one OpenCode session, so
+# Herdr's sidebar state is per session instead of a process-wide aggregate.
+export HERDR_ENV=1
+exec opencode "$@"
