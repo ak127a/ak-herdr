@@ -8,7 +8,7 @@ app=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
 os=${HERDR_SETUP_OS:-$(uname -s)}
 mac_mod=${MAC_MOD:-cmd}
 
-MODS="sidebar-tree tabs-clean space-picker"
+MODS="sidebar-tree tabs-clean space-picker nvim-popup"
 
 # install.sh rewrites alt-* to $MAC_MOD-* on macOS and adds the Mac terminal
 # chords (Cmd+C/V/A, Option+arrow word jump, Cmd+arrow line start/end); undo

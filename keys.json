@@ -126,6 +126,8 @@
     "alt-j": "sidebar-tree.needs_you",
     "ctrl-space l": "sidebar-tree.last_tab",
     "ctrl-space shift-l": "sidebar-tree.last_space",
-    "ctrl-space shift-p": "sidebar-tree.start_pi"
+    "ctrl-space shift-p": "sidebar-tree.start_pi",
+    "alt-e": "nvim-popup.toggle",
+    "ctrl-space e": "nvim-popup.toggle"
   }
 }

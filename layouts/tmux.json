@@ -76,6 +76,16 @@
           "window_drag": true
         },
         {
+          "id": "nvim",
+          "type": "block",
+          "size": {
+            "px": 0
+          },
+          "content": {
+            "mod": "nvim-popup"
+          }
+        },
+        {
           "id": "work-body",
           "type": "row",
           "children": [

@@ -26,6 +26,10 @@ needs you.
 - **`mods/tabs-clean`** — tab pills with program icons, agent status,
   per-tab close buttons.
 - **`mods/space-picker`** — fuzzy space picker (`prefix + q`).
+- **`mods/nvim-popup`** — Neovim in a floating window over the tab, opened in
+  the folder the focused terminal or agent is in, as `nvim .` so the folder
+  itself opens (`Alt+E` or `prefix + e`), and put away with the same key
+  without quitting: it is a terminal of its own, not a tab.
 - **`keys.json`** — tmux-style `Ctrl+Space` prefix plus direct keys, and
   `Alt+J` to jump to the agent that needs you.
 - **`bin/opencode-herdr`** — a two-line wrapper that starts `opencode` with
@@ -43,7 +47,7 @@ cd ak-herdr
 ./install.sh
 ```
 
-The script copies `keys.json`, `layouts/tmux.json` and the three mods into
+The script copies `keys.json`, `layouts/tmux.json` and the four mods into
 `~/.config/herdr-app` (or `$HERDR_APP_HOME`), and `opencode-herdr` into
 `~/.local/bin`, keeping anything it replaces as `<name>.bak-<date>`. Herdr
 reads these files live, so a running window picks them up, and the script
@@ -62,6 +66,38 @@ Press it again to walk through the rest of them; it wraps around. When nothing
 needs you it says so in a toast. The sidebar marks the same agents with a
 "Needs you" badge.
 
+## Floating Neovim
+
+`Alt+E` (`Cmd+E` on macOS), or `prefix + e`, floats Neovim over the window,
+opened in the folder the focused terminal is working in right now, the way
+`nvim .` opens it: the folder comes up in the file tree, and it follows a shell
+that `cd`ed.
+
+- It is a dialog of nearly the whole window — 94% wide, 92% tall, the terminal
+  from edge to edge, no header bar of its own.
+- It is a terminal of its own, started by herdr-core with no space or tab
+  labels, so it never shows up in the sidebar or the tab bar: nothing in the
+  space changes while it is open.
+- It has the keyboard as it opens, and Esc goes to Neovim, not to the dialog.
+- **Each folder keeps its own session.** Come back to a folder and the same
+  Neovim comes back, buffers and undo history with it; another folder gets its
+  own. The key puts it away without quitting; `:q` ends it, and the next press
+  in that folder starts a fresh one.
+- The folder comes from the program running in the pane, not the folder the
+  pane was opened in: Herdr's `cwd` stays put when a shell `cd`s, so the mod
+  asks herdr-core for the one the program is in now.
+- Neovim has to be on the machine's `PATH`; without it the key says so in a
+  toast instead of doing nothing.
+
+The mod keeps the block it takes the key from at zero height, so the window has
+no extra furniture. Want a small `nvim` tab in the bottom-right corner that does
+the same as the key? Give that block a height in `layouts/tmux.json` (it is the
+`nvim` block, `"size": { "px": 0 }` by default):
+
+```json
+{ "id": "nvim", "type": "block", "size": { "px": 30 }, "content": { "mod": "nvim-popup" } }
+```
+
 ## Shortcuts
 
 `keys.json` is the source of truth; these are the ones worth knowing.
@@ -71,6 +107,7 @@ needs you it says so in a toast. The sidebar marks the same agents with a
 | Key | Action |
 | --- | --- |
 | `Alt+J` | **jump to the agent that needs you** (this layout) |
+| `Alt+E` | **floating Neovim** in the focused folder: show, then hide |
 | `Alt+[` / `Alt+]` | previous / next agent |
 | `Alt+Shift+[` / `Alt+Shift+]` | previous / next tab |
 | `Alt+1…9` / `Ctrl+1…9` | select tab |
@@ -108,6 +145,7 @@ needs you it says so in a toast. The sidebar marks the same agents with a
 | `l` / `Shift+L` | last tab / last space |
 | `Shift+P` | start `pi` in a new tab |
 | `Shift+O` | new tab running `opencode-herdr` (needs `opencode` on PATH) |
+| `e` | floating Neovim in the focused folder (same key hides it) |
 
 ### In a terminal
 
@@ -167,6 +205,7 @@ layouts/tmux.json         the window (no pane headers, no status bar)
 mods/sidebar-tree/        spaces + agents sidebar, Alt+J jump, last-* keys
 mods/tabs-clean/          tab pills
 mods/space-picker/        prefix + q
+mods/nvim-popup/          floating Neovim (Alt+E, prefix + e)
 bin/opencode-herdr        one OpenCode session per tab (prefix + Shift+O)
 ```
 
