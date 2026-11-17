@@ -88,6 +88,9 @@ that `cd`ed.
   asks herdr-core for the one the program is in now.
 - Neovim has to be on the machine's `PATH`; without it the key says so in a
   toast instead of doing nothing.
+- The mod asks Herdr for the dialog only as far as that Herdr can do it: on an
+  older build that cannot put a terminal in an overlay's layout, it falls back
+  to Herdr's own peek, which is smaller. Same key, same sessions.
 
 The mod keeps the block it takes the key from at zero height, so the window has
 no extra furniture. Want a small `nvim` tab in the bottom-right corner that does

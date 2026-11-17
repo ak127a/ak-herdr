@@ -15,10 +15,21 @@
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import {
-  checking, closeOverlay, exec, focused, hc, home, nextCommand, notify,
-  openOverlay, run, setShared, shared, terminals, theme,
-} from "herdr";
+// A namespace, not named imports: Herdr's module grows between releases, and a
+// name this version lacks would fail the whole mod at load time (an older Herdr
+// has no `checking`, for one). Everything is read off it when it is used.
+import * as herdr from "herdr";
+
+const {
+  closeOverlay, exec, focused, home, nextCommand, notify, openOverlay, run,
+  setShared, shared, terminals, theme,
+} = herdr;
+
+// herdr-core: the app's own bridge where it has one, else the same `hc` binary
+// from PATH.
+async function core(args) {
+  return typeof herdr.hc === "function" ? herdr.hc(args) : exec("hc", args);
+}
 
 // Folder -> the core terminal running Neovim there.
 const SESSIONS = "nvim.sessions";
@@ -45,7 +56,7 @@ async function folder() {
   const address = focused()?.terminal;
 
   if (address && !address.includes("/")) {
-    const r = await hc(["get", address]);
+    const r = await core(["get", address]);
     const line = r.stdout.trim().split("\n").pop() ?? "";
 
     try {
@@ -75,7 +86,9 @@ async function known(address, cx) {
 
 export default class NvimPopup extends View {
   init(_props, cx) {
-    if (checking()) return;
+    // Older Herdr releases have no `checking`; there, a check runs this for
+    // real, which only starts the key loop.
+    if (typeof herdr.checking === "function" && herdr.checking()) return;
 
     cx.spawn(async (cx) => {
       for (;;) {
@@ -91,7 +104,10 @@ export default class NvimPopup extends View {
     // A terminal in a dialog has the keyboard while the dialog is up, and no
     // pane: this one is showing, so the key puts it away (Neovim keeps running).
     if (focused()?.pane === null && Object.values(all).includes(focused()?.terminal)) {
-      closeOverlay(shared(OVERLAY));
+      const shown = shared(OVERLAY);
+      if (shown) closeOverlay(shown);
+      else run("overlay.close"); // a peek, on a Herdr too old for the dialog
+      setShared(OVERLAY, null);
       cx.notify();
       return;
     }
@@ -107,15 +123,30 @@ export default class NvimPopup extends View {
       if (!(await known(address, cx))) return;
     }
 
-    setShared(
-      OVERLAY,
-      openOverlay({
-        kind: "dialog",
-        width: 0.94,
-        height: 0.92,
-        layout: { type: "block", content: { terminal: address } },
-      }),
-    );
+    const dialog = openOverlay({
+      kind: "dialog",
+      width: 0.94,
+      height: 0.92,
+      layout: { type: "block", content: { terminal: address } },
+    });
+
+    // A Herdr without terminals in an overlay's layout draws an empty dialog
+    // and gives the terminal no keyboard; the peek it does have puts the
+    // terminal up, smaller, and takes the keyboard. Give the dialog a moment
+    // first, so a slow focus is not mistaken for that.
+    let focusedIt = false;
+    for (let i = 0; i < 20 && !focusedIt; i += 1) {
+      focusedIt = focused()?.terminal === address;
+      if (!focusedIt) await cx.sleep(100);
+    }
+
+    if (focusedIt) {
+      setShared(OVERLAY, dialog);
+    } else {
+      closeOverlay(dialog);
+      setShared(OVERLAY, null);
+      run("terminal.peek", { terminal: address });
+    }
 
     cx.notify();
   }
@@ -133,7 +164,7 @@ export default class NvimPopup extends View {
       return null;
     }
 
-    const r = await hc(["run", "--json", "--bg", "--rm", "--no-parent", "--cwd", where, "--", "nvim", "."]);
+    const r = await core(["run", "--json", "--bg", "--rm", "--no-parent", "--cwd", where, "--", "nvim", "."]);
     const line = r.stdout.trim().split("\n").pop() ?? "";
 
     let address = null;
