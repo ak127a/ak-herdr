@@ -117,6 +117,8 @@ needs you it says so in a toast. The sidebar marks the same agents with a
 | `Ctrl+V` | paste an image |
 | `Cmd+C` / `Cmd+V` / `Cmd+A` | copy / paste / select all (macOS only) |
 | `Ctrl+Left` / `Ctrl+Right` | word left / right |
+| `Option+←` / `Option+→` | word left / right (macOS; see below) |
+| `Cmd+←` / `Cmd+→` | line start / end (macOS) |
 | `Ctrl+Backspace` | delete word |
 
 ## macOS: Alt is Cmd
@@ -125,8 +127,10 @@ On macOS the Alt/Option key types characters, so the same shortcuts use
 **Cmd** there. `install.sh` rewrites every `alt-…` key to `cmd-…` while
 copying `keys.json`, so `Alt+J` becomes `Cmd+J`, `Alt+H J K L` become
 `Cmd+H J K L`, and so on. It also adds the Mac terminal habits that a
-custom `keys.json` would otherwise lose: `Cmd+V` paste, `Cmd+C` copy and
-`Cmd+A` select all.
+custom `keys.json` would otherwise lose: `Cmd+V` paste, `Cmd+C` copy,
+`Cmd+A` select all, `Option+←` / `Option+→` for word left / right, and
+`Cmd+←` / `Cmd+→` for start / end of line, the same split the Mac text fields
+use.
 
 If you want another modifier instead, set it before installing:
 
@@ -134,8 +138,16 @@ If you want another modifier instead, set it before installing:
 MAC_MOD="ctrl-alt" ./install.sh   # Alt+J becomes Ctrl+Alt+J
 ```
 
-Two macOS collisions to know about:
+Three macOS collisions to know about:
 
+- **Word jump:** macOS keeps `Ctrl+←` / `Ctrl+→` for Mission Control
+  ("Move left a space" / "Move right a space") and `Ctrl+1…9` for "Switch to
+  Desktop", so those keys never reach Herdr (that is also why `Ctrl+1…9` tab
+  select looks dead on a Mac). Turn them off in System Settings → Keyboard →
+  Keyboard Shortcuts… → Mission Control. Until you do, use `Option+←` /
+  `Option+→` for words and `Cmd+←` / `Cmd+→` for the start / end of the line,
+  which work without changing anything in the OS (if they do nothing, turn
+  Option-as-Alt on in Settings → Keyboard).
 - `Cmd+H` is "Hide app" in every Mac app. If pane-left doesn't reach Herdr,
   rebind `alt-h` in `~/.config/herdr-app/keys.json` to something free
   (e.g. `"ctrl-alt-h": "pane.go:left"`).
@@ -143,8 +155,9 @@ Two macOS collisions to know about:
   prefix eats keys, change the `ctrl-space …` bindings in `keys.json`.
 
 `sync.sh` reverses both on macOS — it drops the added `Cmd+V` / `Cmd+C` /
-`Cmd+A` terminal keys and turns `cmd-…` back into `alt-…` — so the repo always
-stores the Linux/Windows spelling.
+`Cmd+A`, `Option+←` / `Option+→` and `Cmd+←` / `Cmd+→` terminal keys and turns
+`cmd-…` back into `alt-…` — so the repo always stores the Linux/Windows
+spelling.
 
 ## Layout and mods
 

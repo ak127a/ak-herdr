@@ -27,16 +27,25 @@ mkdir -p "$app/layouts" "$app/mods"
 # On macOS Alt types characters: the scripts use Cmd there instead (MAC_MOD=...),
 # and the terminal gets the Cmd+V / Cmd+C / Cmd+A a Mac user expects.
 if [ "$os" = "Darwin" ]; then
+  # Option is the Mac word-jump key, and Option+arrow formats never compose a
+  # character, so keep those two as alt-* (the sed below would make them cmd-*,
+  # which Mac users expect to mean start/end of line). Mission Control owns
+  # Ctrl+Left/Right, so Option+arrow is the gesture that always reaches Herdr.
+  # Cmd+arrow gets the Mac text-field meaning: start/end of line.
   sed "s/\"alt-/\"$mac_mod-/g" "$here/keys.json" |
     awk '/^  "terminal": \{$/ {
            print
            print "    \"cmd-v\": \"terminal.paste\","
            print "    \"cmd-c\": \"terminal.copy\","
            print "    \"cmd-a\": \"terminal.select_all\","
+           print "    \"alt-left\": \"send:\\u001bb\","
+           print "    \"alt-right\": \"send:\\u001bf\","
+           print "    \"cmd-left\": \"send:\\u0001\","
+           print "    \"cmd-right\": \"send:\\u0005\","
            next
          }
          { print }' > "$app/keys.json.new"
-  say "keys    alt-* as $mac_mod-*, terminal cmd-v/c/a (macOS)"
+  say "keys    alt-* as $mac_mod-*, terminal cmd-v/c/a and option/cmd-arrows (macOS)"
 else
   cp "$here/keys.json" "$app/keys.json.new"
   say "keys    alt-* as alt-*"

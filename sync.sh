@@ -10,12 +10,17 @@ mac_mod=${MAC_MOD:-cmd}
 
 MODS="sidebar-tree tabs-clean space-picker"
 
-# install.sh rewrites alt-* to $MAC_MOD-* on macOS and adds Cmd+C/V/A; undo
-# both so the repo keeps one canonical file with Alt shortcuts.
+# install.sh rewrites alt-* to $MAC_MOD-* on macOS and adds the Mac terminal
+# chords (Cmd+C/V/A, Option+arrow word jump, Cmd+arrow line start/end); undo
+# all of it so the repo keeps one canonical file with Alt shortcuts.
 if [ "$os" = "Darwin" ]; then
   sed -e '/^    "cmd-v": "terminal\.paste",$/d' \
       -e '/^    "cmd-c": "terminal\.copy",$/d' \
       -e '/^    "cmd-a": "terminal\.select_all",$/d' \
+      -e '/^    "alt-left": "send:\\u001bb",$/d' \
+      -e '/^    "alt-right": "send:\\u001bf",$/d' \
+      -e '/^    "cmd-left": "send:\\u0001",$/d' \
+      -e '/^    "cmd-right": "send:\\u0005",$/d' \
       -e "s/\"$mac_mod-/\"alt-/g" "$app/keys.json" > "$here/keys.json"
 else
   cp "$app/keys.json" "$here/keys.json"
