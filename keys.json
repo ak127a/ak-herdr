@@ -98,6 +98,13 @@
     "ctrl-space s": "mod.open:picker",
     "ctrl-space w": "mod.open:picker",
     "ctrl-space q": "mod.open:space-picker",
+    "ctrl-space shift-a": {
+      "command": "tab.new",
+      "args": {
+        "name": "Antigravity",
+        "argv": ["agy"]
+      }
+    },
     "ctrl-space shift-o": {
       "command": "tab.new",
       "args": {

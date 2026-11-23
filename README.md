@@ -146,6 +146,7 @@ the same as the key? Give that block a height in `layouts/tmux.json` (it is the
 | `d` | close window |
 | `a` | last agent |
 | `l` / `Shift+L` | last tab / last space |
+| `Shift+A` | start Antigravity (`agy`) in a new tab |
 | `Shift+P` | start `pi` in a new tab |
 | `Shift+O` | new tab running `opencode-herdr` (needs `opencode` on PATH) |
 | `e` | floating Neovim in the focused folder (same key hides it) |
