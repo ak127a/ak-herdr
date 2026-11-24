@@ -51,7 +51,7 @@ cd ak-herdr
 
 The script copies `keys.json`, `layouts/tmux.json` and the mods into
 `~/.config/herdr-app` (or `$HERDR_APP_HOME`), and `opencode-herdr` into
-`~/.local/bin`, keeping anything it replaces as `<name>.bak-<date>`. Herdr
+`~/.local/bin`, keeping anything it replaces under `backups/<date>/`. Herdr
 reads these files live, so a running window picks them up, and the script
 switches it to the `tmux` layout. On a fresh machine you can also pick it
 with `Ctrl+Shift+L` or the command palette.

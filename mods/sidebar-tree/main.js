@@ -81,10 +81,14 @@ export default class SidebarTree extends View {
 
     // Navigation history, the agent jump and the order new tabs land in: the
     // layout has no status bar to host these, the sidebar is always shown.
-    this.history = new NavigationHistory();
-    this.history.observe(spaces());
-    this.agentHistory = new AgentHistory();
-    this.agentHistory.observe(agents(), focused());
+    let navInitial = null;
+    try { navInitial = JSON.parse(localStorage.getItem("navHistory") ?? "null"); } catch { navInitial = null; }
+    this.history = new NavigationHistory(navInitial);
+    if (this.history.observe(spaces())) this.saveNavHistory();
+    let agentInitial = null;
+    try { agentInitial = JSON.parse(localStorage.getItem("agentHistory") ?? "null"); } catch { agentInitial = null; }
+    this.agentHistory = new AgentHistory(agentInitial);
+    if (this.agentHistory.observe(agents(), focused())) this.saveAgentHistory();
     this.tabOrder = new TabOrder();
     this.tabOrder.observe(spaces());
     cx.spawn(async (cx) => {
@@ -100,14 +104,19 @@ export default class SidebarTree extends View {
           continue;
         }
         if (command === "last_agent") {
-          const terminal = this.agentHistory.target(agents(), focused());
+          const ag = agents();
+          const foc = focused();
+          if (this.agentHistory.observe(ag, foc)) this.saveAgentHistory();
+          const terminal = this.agentHistory.target(ag, foc);
           if (terminal) run("agent.focus", { terminal });
           else notify({ title: "No previous agent yet", level: "info" });
           cx.notify();
           continue;
         }
         if (command !== "last_tab" && command !== "last_space") continue;
-        const id = this.history.target(command, spaces());
+        const sp = spaces();
+        if (this.history.observe(sp)) this.saveNavHistory();
+        const id = this.history.target(command, sp);
         if (id) run(command === "last_space" ? "space.select" : "tab.select", { id });
         else notify({ title: command === "last_space" ? "No previous space yet" : "No previous tab in this space yet", level: "info" });
         cx.notify();
@@ -139,6 +148,14 @@ export default class SidebarTree extends View {
 
   saveFolded() {
     localStorage.setItem("folded", JSON.stringify([...this.folded]));
+  }
+
+  saveNavHistory() {
+    localStorage.setItem("navHistory", JSON.stringify(this.history.serialize()));
+  }
+
+  saveAgentHistory() {
+    localStorage.setItem("agentHistory", JSON.stringify(this.agentHistory.serialize()));
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
@@ -223,8 +240,8 @@ export default class SidebarTree extends View {
   render() {
     // Append newly seen tabs from any creation path; leave existing tabs alone.
     for (const move of this.tabOrder.observe(spaces())) run("tab.move", move);
-    this.history.observe(spaces());
-    this.agentHistory.observe(agents(), focused());
+    if (this.history.observe(spaces())) this.saveNavHistory();
+    if (this.agentHistory.observe(agents(), focused())) this.saveAgentHistory();
     const t = theme();
     const collapsed = narrow();
     const now = Date.now();
