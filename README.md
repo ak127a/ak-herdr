@@ -26,6 +26,8 @@ needs you.
 - **`mods/tabs-clean`** — tab pills with program icons, agent status,
   per-tab close buttons.
 - **`mods/space-picker`** — fuzzy space picker (`prefix + q`).
+- **`mods/picker-clean`** — fuzzy tab/space/agent picker (`prefix + w` / `prefix + s` / `Ctrl+Shift+K`) that shows live agent session names (e.g. OpenCode) and program names instead of raw tab numbers.
+- **`mods/toast-clean`** — in-app notifications that show live agent session names instead of tab numbers.
 - **`mods/nvim-popup`** — Neovim in a floating window over the tab, opened in
   the folder the focused terminal or agent is in, as `nvim .` so the folder
   itself opens (`Alt+E` or `prefix + e`), and put away with the same key
@@ -47,7 +49,7 @@ cd ak-herdr
 ./install.sh
 ```
 
-The script copies `keys.json`, `layouts/tmux.json` and the four mods into
+The script copies `keys.json`, `layouts/tmux.json` and the mods into
 `~/.config/herdr-app` (or `$HERDR_APP_HOME`), and `opencode-herdr` into
 `~/.local/bin`, keeping anything it replaces as `<name>.bak-<date>`. Herdr
 reads these files live, so a running window picks them up, and the script
@@ -209,13 +211,16 @@ layouts/tmux.json         the window (no pane headers, no status bar)
 mods/sidebar-tree/        spaces + agents sidebar, Alt+J jump, last-* keys
 mods/tabs-clean/          tab pills
 mods/space-picker/        prefix + q
+mods/picker-clean/        prefix + w / prefix + s / Ctrl+Shift+K picker
+mods/toast-clean/         in-app notifications with live session names
 mods/nvim-popup/          floating Neovim (Alt+E, prefix + e)
 bin/opencode-herdr        one OpenCode session per tab (prefix + Shift+O)
 ```
 
-Shipped Herdr mods (`workspace-chrome`, `pane`, `files`, `changes`, `picker`)
-are used as-is, so they stay up to date with the app. `tabs-clean` and
-`space-picker` are frozen copies of the shipped `tabs` and `picker`
+Shipped Herdr mods (`workspace-chrome`, `pane`, `files`, `changes`)
+are used as-is, so they stay up to date with the app. `tabs-clean`,
+`space-picker`, `picker-clean` and `toast-clean` are frozen copies of the
+shipped `tabs`, `picker` and `toast`
 (v0.1.16) — if Herdr changes their API, update them with
 `herdr-app do mod.clone '{"name":"tabs","as":"tabs-clean-2"}'` and point the
 layout at the new name.
