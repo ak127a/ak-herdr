@@ -11,7 +11,7 @@ stamp=$(date +%Y%m%d-%H%M%S)
 
 say() { printf '%s\n' "$*"; }
 
-MODS="sidebar-tree tabs-clean space-picker nvim-popup"
+MODS="sidebar-tree tabs-clean space-picker picker-clean toast-clean nvim-popup"
 
 backup() {
   [ -e "$1" ] || return 0
