@@ -26,8 +26,8 @@ needs you.
 - **`mods/tabs-clean`** — tab pills with program icons, agent status,
   per-tab close buttons.
 - **`mods/space-picker`** — fuzzy space picker (`prefix + q`).
-- **`mods/picker-clean`** — fuzzy tab/space/agent picker (`prefix + w` / `prefix + s` / `Ctrl+Shift+K`) that shows live agent session names (e.g. OpenCode) and program names instead of raw tab numbers.
-- **`mods/toast-clean`** — in-app notifications that show live agent session names instead of tab numbers.
+- **`mods/picker-clean`** — fuzzy tab/space/agent picker (`prefix + w` / `prefix + s` / `Ctrl+Shift+K`) that shows live agent session names (e.g. OpenCode, Antigravity) and program names instead of raw tab numbers.
+- **`mods/toast-clean`** — in-app notifications that show live agent session names (e.g. OpenCode, Antigravity) instead of tab numbers.
 - **`mods/nvim-popup`** — Neovim in a floating window over the tab, opened in
   the folder the focused terminal or agent is in, as `nvim .` so the folder
   itself opens (`Alt+E` or `prefix + e`), and put away with the same key
@@ -38,6 +38,11 @@ needs you.
   `HERDR_ENV=1` (one OpenCode session per Herdr tab). `install.sh` puts it in
   `~/.local/bin` and `prefix + Shift+O` runs it — keep `~/.local/bin` on your
   PATH, or the tab says `opencode-herdr: not found`.
+- **`bin/agy-title`** — window-title script for Antigravity (`agy`). `install.sh`
+  installs it to `~/.gemini/antigravity-cli/title.sh` and merges a `"title"`
+  command block into `~/.gemini/antigravity-cli/settings.json` so Antigravity
+  session names (auto-generated titles, `/resume`, and `/rename`) show up live
+  in Herdr's sidebar, tabs, picker, and toasts.
 
 ## Install
 
@@ -50,11 +55,12 @@ cd ak-herdr
 ```
 
 The script copies `keys.json`, `layouts/tmux.json` and the mods into
-`~/.config/herdr-app` (or `$HERDR_APP_HOME`), and `opencode-herdr` into
-`~/.local/bin`, keeping anything it replaces under `backups/<date>/`. Herdr
-reads these files live, so a running window picks them up, and the script
-switches it to the `tmux` layout. On a fresh machine you can also pick it
-with `Ctrl+Shift+L` or the command palette.
+`~/.config/herdr-app` (or `$HERDR_APP_HOME`), `opencode-herdr` into
+`~/.local/bin`, and `agy-title` + the `"title"` setting into
+`~/.gemini/antigravity-cli` (or `$AGY_HOME`), keeping anything it replaces
+under `backups/<date>/`. Herdr reads these files live, so a running window
+picks them up, and the script switches it to the `tmux` layout. On a fresh
+machine you can also pick it with `Ctrl+Shift+L` or the command palette.
 
 ## Jump to the agent that needs you
 
@@ -215,6 +221,7 @@ mods/picker-clean/        prefix + w / prefix + s / Ctrl+Shift+K picker
 mods/toast-clean/         in-app notifications with live session names
 mods/nvim-popup/          floating Neovim (Alt+E, prefix + e)
 bin/opencode-herdr        one OpenCode session per tab (prefix + Shift+O)
+bin/agy-title             live Antigravity session names in Herdr titles
 ```
 
 Shipped Herdr mods (`workspace-chrome`, `pane`, `files`, `changes`)

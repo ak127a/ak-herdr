@@ -44,4 +44,11 @@ if [ -f "$HOME/.local/bin/opencode-herdr" ]; then
   cp "$HOME/.local/bin/opencode-herdr" "$here/bin/opencode-herdr"
 fi
 
+agy_home=${AGY_HOME:-$HOME/.gemini/antigravity-cli}
+if [ -f "$agy_home/title.sh" ]; then
+  mkdir -p "$here/bin"
+  cp "$agy_home/title.sh" "$here/bin/agy-title"
+  chmod +x "$here/bin/agy-title"
+fi
+
 printf 'synced %s -> %s\n' "$app" "$here"

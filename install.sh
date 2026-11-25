@@ -5,6 +5,7 @@ set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 app=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
+agy_home=${AGY_HOME:-$HOME/.gemini/antigravity-cli}
 os=${HERDR_SETUP_OS:-$(uname -s)}
 mac_mod=${MAC_MOD:-cmd}
 stamp=$(date +%Y%m%d-%H%M%S)
@@ -113,6 +114,89 @@ case ":$PATH:" in
   *) say "note: ~/.local/bin is not on this shell's PATH; add it so Herdr can run opencode-herdr" ;;
 esac
 command -v opencode >/dev/null 2>&1 || say "note: opencode is not on PATH; the opencode-herdr tab needs it"
+
+# Antigravity (agy) window title script + settings.json "title" block so live
+# conversation names (including auto-generated titles and /rename) show in Herdr.
+mkdir -p "$agy_home"
+if [ -f "$agy_home/title.sh" ] && cmp -s "$here/bin/agy-title" "$agy_home/title.sh"; then
+  chmod +x "$agy_home/title.sh"
+  say "agy     $agy_home/title.sh (unchanged)"
+else
+  if [ -e "$agy_home/title.sh" ]; then
+    mkdir -p "$backup_root/antigravity-cli"
+    cp "$agy_home/title.sh" "$backup_root/antigravity-cli/title.sh"
+    say "  kept $backup_root/antigravity-cli/title.sh"
+  fi
+  cp "$here/bin/agy-title" "$agy_home/title.sh"
+  chmod +x "$agy_home/title.sh"
+  say "agy     $agy_home/title.sh"
+fi
+
+if [ "$agy_home" = "$HOME/.gemini/antigravity-cli" ]; then
+  agy_title_cmd="~/.gemini/antigravity-cli/title.sh"
+else
+  agy_title_cmd="$agy_home/title.sh"
+fi
+
+if command -v python3 >/dev/null 2>&1; then
+  agy_settings_status=$(python3 - "$agy_home/settings.json" "$agy_title_cmd" <<'PY'
+import json
+import os
+import sys
+
+path, cmd = sys.argv[1], sys.argv[2]
+target = {"type": "command", "command": cmd, "enabled": True}
+
+if os.path.exists(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        print("invalid")
+        sys.exit(0)
+    if not isinstance(data, dict):
+        print("invalid")
+        sys.exit(0)
+    mode = os.stat(path).st_mode & 0o777
+else:
+    data = {}
+    mode = 0o600
+
+if data.get("title") == target:
+    print("unchanged")
+    sys.exit(0)
+
+data["title"] = target
+tmp = path + ".new"
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+os.chmod(tmp, mode)
+print("changed")
+PY
+)
+  case "$agy_settings_status" in
+    unchanged)
+      say "agy     $agy_home/settings.json (unchanged)"
+      ;;
+    changed)
+      if [ -e "$agy_home/settings.json" ]; then
+        mkdir -p "$backup_root/antigravity-cli"
+        cp "$agy_home/settings.json" "$backup_root/antigravity-cli/settings.json"
+        say "  kept $backup_root/antigravity-cli/settings.json"
+      fi
+      mv "$agy_home/settings.json.new" "$agy_home/settings.json"
+      say "agy     $agy_home/settings.json"
+      ;;
+    *)
+      say "note: $agy_home/settings.json is not valid JSON; skipping title config"
+      ;;
+  esac
+else
+  say "note: python3 is not on PATH; skipping $agy_home/settings.json title config"
+fi
+command -v agy >/dev/null 2>&1 || say "note: agy is not on PATH; the Antigravity tab needs it"
 
 if [ -f "$app/layouts/tmux.json" ] && cmp -s "$here/layouts/tmux.json" "$app/layouts/tmux.json"; then
   say "layout  layouts/tmux.json (unchanged)"
