@@ -105,41 +105,50 @@ for m in $MODS; do
 done
 
 # Ctrl+Space Shift+O runs this wrapper: one OpenCode session per Herdr tab.
-mkdir -p "$HOME/.local/bin"
-cp "$here/bin/opencode-herdr" "$HOME/.local/bin/opencode-herdr"
-chmod +x "$HOME/.local/bin/opencode-herdr"
-say "bin     ~/.local/bin/opencode-herdr"
-case ":$PATH:" in
-  *":$HOME/.local/bin:"*) ;;
-  *) say "note: ~/.local/bin is not on this shell's PATH; add it so Herdr can run opencode-herdr" ;;
-esac
-command -v opencode >/dev/null 2>&1 || say "note: opencode is not on PATH; the opencode-herdr tab needs it"
+if command -v opencode >/dev/null 2>&1; then
+  mkdir -p "$HOME/.local/bin"
+  if [ -f "$HOME/.local/bin/opencode-herdr" ] && cmp -s "$here/bin/opencode-herdr" "$HOME/.local/bin/opencode-herdr"; then
+    chmod +x "$HOME/.local/bin/opencode-herdr"
+    say "bin     ~/.local/bin/opencode-herdr (unchanged)"
+  else
+    cp "$here/bin/opencode-herdr" "$HOME/.local/bin/opencode-herdr"
+    chmod +x "$HOME/.local/bin/opencode-herdr"
+    say "bin     ~/.local/bin/opencode-herdr"
+  fi
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) say "note: ~/.local/bin is not on this shell's PATH; add it so Herdr can run opencode-herdr" ;;
+  esac
+else
+  say "bin     opencode not found (skipped)"
+fi
 
 # Antigravity (agy) window title script + settings.json "title" block so live
 # conversation names (including auto-generated titles and /rename) show in Herdr.
-mkdir -p "$agy_home"
-if [ -f "$agy_home/title.sh" ] && cmp -s "$here/bin/agy-title" "$agy_home/title.sh"; then
-  chmod +x "$agy_home/title.sh"
-  say "agy     $agy_home/title.sh (unchanged)"
-else
-  if [ -e "$agy_home/title.sh" ]; then
-    mkdir -p "$backup_root/antigravity-cli"
-    cp "$agy_home/title.sh" "$backup_root/antigravity-cli/title.sh"
-    say "  kept $backup_root/antigravity-cli/title.sh"
+if command -v agy >/dev/null 2>&1; then
+  mkdir -p "$agy_home"
+  if [ -f "$agy_home/title.sh" ] && cmp -s "$here/bin/agy-title" "$agy_home/title.sh"; then
+    chmod +x "$agy_home/title.sh"
+    say "agy     $agy_home/title.sh (unchanged)"
+  else
+    if [ -e "$agy_home/title.sh" ]; then
+      mkdir -p "$backup_root/antigravity-cli"
+      cp "$agy_home/title.sh" "$backup_root/antigravity-cli/title.sh"
+      say "  kept $backup_root/antigravity-cli/title.sh"
+    fi
+    cp "$here/bin/agy-title" "$agy_home/title.sh"
+    chmod +x "$agy_home/title.sh"
+    say "agy     $agy_home/title.sh"
   fi
-  cp "$here/bin/agy-title" "$agy_home/title.sh"
-  chmod +x "$agy_home/title.sh"
-  say "agy     $agy_home/title.sh"
-fi
 
-if [ "$agy_home" = "$HOME/.gemini/antigravity-cli" ]; then
-  agy_title_cmd="~/.gemini/antigravity-cli/title.sh"
-else
-  agy_title_cmd="$agy_home/title.sh"
-fi
+  if [ "$agy_home" = "$HOME/.gemini/antigravity-cli" ]; then
+    agy_title_cmd="~/.gemini/antigravity-cli/title.sh"
+  else
+    agy_title_cmd="$agy_home/title.sh"
+  fi
 
-if command -v python3 >/dev/null 2>&1; then
-  agy_settings_status=$(python3 - "$agy_home/settings.json" "$agy_title_cmd" <<'PY'
+  if command -v python3 >/dev/null 2>&1; then
+    agy_settings_status=$(python3 - "$agy_home/settings.json" "$agy_title_cmd" <<'PY'
 import json
 import os
 import sys
@@ -176,27 +185,29 @@ os.chmod(tmp, mode)
 print("changed")
 PY
 )
-  case "$agy_settings_status" in
-    unchanged)
-      say "agy     $agy_home/settings.json (unchanged)"
-      ;;
-    changed)
-      if [ -e "$agy_home/settings.json" ]; then
-        mkdir -p "$backup_root/antigravity-cli"
-        cp "$agy_home/settings.json" "$backup_root/antigravity-cli/settings.json"
-        say "  kept $backup_root/antigravity-cli/settings.json"
-      fi
-      mv "$agy_home/settings.json.new" "$agy_home/settings.json"
-      say "agy     $agy_home/settings.json"
-      ;;
-    *)
-      say "note: $agy_home/settings.json is not valid JSON; skipping title config"
-      ;;
-  esac
+    case "$agy_settings_status" in
+      unchanged)
+        say "agy     $agy_home/settings.json (unchanged)"
+        ;;
+      changed)
+        if [ -e "$agy_home/settings.json" ]; then
+          mkdir -p "$backup_root/antigravity-cli"
+          cp "$agy_home/settings.json" "$backup_root/antigravity-cli/settings.json"
+          say "  kept $backup_root/antigravity-cli/settings.json"
+        fi
+        mv "$agy_home/settings.json.new" "$agy_home/settings.json"
+        say "agy     $agy_home/settings.json"
+        ;;
+      *)
+        say "note: $agy_home/settings.json is not valid JSON; skipping title config"
+        ;;
+    esac
+  else
+    say "note: python3 is not on PATH; skipping $agy_home/settings.json title config"
+  fi
 else
-  say "note: python3 is not on PATH; skipping $agy_home/settings.json title config"
+  say "agy     not found (skipped)"
 fi
-command -v agy >/dev/null 2>&1 || say "note: agy is not on PATH; the Antigravity tab needs it"
 
 if [ -f "$app/layouts/tmux.json" ] && cmp -s "$here/layouts/tmux.json" "$app/layouts/tmux.json"; then
   say "layout  layouts/tmux.json (unchanged)"

@@ -35,14 +35,14 @@ needs you.
 - **`keys.json`** — tmux-style `Ctrl+Space` prefix plus direct keys, and
   `Alt+J` to jump to the agent that needs you.
 - **`bin/opencode-herdr`** — a two-line wrapper that starts `opencode` with
-  `HERDR_ENV=1` (one OpenCode session per Herdr tab). `install.sh` puts it in
-  `~/.local/bin` and `prefix + Shift+O` runs it — keep `~/.local/bin` on your
-  PATH, or the tab says `opencode-herdr: not found`.
-- **`bin/agy-title`** — window-title script for Antigravity (`agy`). `install.sh`
-  installs it to `~/.gemini/antigravity-cli/title.sh` and merges a `"title"`
-  command block into `~/.gemini/antigravity-cli/settings.json` so Antigravity
-  session names (auto-generated titles, `/resume`, and `/rename`) show up live
-  in Herdr's sidebar, tabs, picker, and toasts.
+  `HERDR_ENV=1` (one OpenCode session per Herdr tab). When `opencode` is on
+  `PATH`, `install.sh` puts it in `~/.local/bin` and `prefix + Shift+O` runs
+  it — keep `~/.local/bin` on your PATH, or the tab says `opencode-herdr: not found`.
+- **`bin/agy-title`** — window-title script for Antigravity (`agy`). When `agy`
+  is on `PATH`, `install.sh` installs it to `~/.gemini/antigravity-cli/title.sh`
+  and merges a `"title"` command block into `~/.gemini/antigravity-cli/settings.json`
+  so Antigravity session names (auto-generated titles, `/resume`, and `/rename`)
+  show up live in Herdr's sidebar, tabs, picker, and toasts.
 
 ## Install
 
@@ -55,9 +55,9 @@ cd ak-herdr
 ```
 
 The script copies `keys.json`, `layouts/tmux.json` and the mods into
-`~/.config/herdr-app` (or `$HERDR_APP_HOME`), `opencode-herdr` into
-`~/.local/bin`, and `agy-title` + the `"title"` setting into
-`~/.gemini/antigravity-cli` (or `$AGY_HOME`), keeping anything it replaces
+`~/.config/herdr-app` (or `$HERDR_APP_HOME`), and configures `opencode-herdr`
+(into `~/.local/bin`) and `agy-title` + `"title"` (into `~/.gemini/antigravity-cli`
+or `$AGY_HOME`) only for the agents present on `PATH`, keeping anything it replaces
 under `backups/<date>/`. Herdr reads these files live, so a running window
 picks them up, and the script switches it to the `tmux` layout. On a fresh
 machine you can also pick it with `Ctrl+Shift+L` or the command palette.
