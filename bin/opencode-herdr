@@ -4,4 +4,7 @@
 # session tabs off; each Herdr tab is then exactly one OpenCode session, so
 # Herdr's sidebar state is per session instead of a process-wide aggregate.
 export HERDR_ENV=1
+if command -v herdr-agent-wrap >/dev/null 2>&1; then
+  exec herdr-agent-wrap opencode "$@"
+fi
 exec opencode "$@"

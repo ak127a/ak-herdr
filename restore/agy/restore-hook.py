@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""Antigravity lifecycle hook (SessionStart/Stop) to record Herdr restore markers."""
+
+from datetime import datetime, timezone
+import json
+import os
+import re
+import sqlite3
+import sys
+
+TERMINAL_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+CONVERSATION_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+STALE_SECONDS = 30 * 24 * 60 * 60
+
+
+def is_subagent_conversation(db_path, cid):
+    if not os.path.exists(db_path):
+        return False
+    con = None
+    try:
+        try:
+            con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+        except sqlite3.OperationalError:
+            con = sqlite3.connect(db_path, timeout=1.0)
+            con.execute("PRAGMA query_only = ON")
+        try:
+            row = con.execute(
+                "SELECT parent_conversation_id, nesting_depth FROM conversation_summaries WHERE conversation_id = ?",
+                (cid,),
+            ).fetchone()
+            if row and ((row[0] or "").strip() or (row[1] or 0) > 0):
+                return True
+        except sqlite3.Error:
+            pass
+        try:
+            prow = con.execute(
+                "SELECT parent_id FROM conversation_parents WHERE conversation_id = ?",
+                (cid,),
+            ).fetchone()
+            if prow and (prow[0] or "").strip():
+                return True
+        except sqlite3.Error:
+            pass
+    except Exception:
+        pass
+    finally:
+        if con is not None:
+            con.close()
+    return False
+
+
+def record_restore_marker(agy_home, cid, cwd):
+    terminal_id = os.environ.get("HC_TERMINAL_ID", "")
+    if not TERMINAL_ID_RE.match(terminal_id):
+        return
+    if not cid or not CONVERSATION_ID_RE.match(cid):
+        return
+    if not os.path.isfile(os.path.join(agy_home, "conversations", f"{cid}.db")):
+        return
+    if is_subagent_conversation(os.path.join(agy_home, "conversation_summaries.db"), cid):
+        return
+
+    state_home = os.environ.get("XDG_STATE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "state"
+    )
+    session_name = re.sub(
+        r"[^A-Za-z0-9_.-]", "_", os.environ.get("HC_SESSION") or "default"
+    )
+    mdir = os.path.join(state_home, "herdr-app", "agent-restore", session_name)
+    mfile = os.path.join(mdir, terminal_id)
+
+    try:
+        cutoff = datetime.now(timezone.utc).timestamp() - STALE_SECONDS
+        for name in os.listdir(mdir):
+            p = os.path.join(mdir, name)
+            try:
+                if os.path.isfile(p) and os.stat(p).st_mtime < cutoff:
+                    os.unlink(p)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+    os.makedirs(mdir, mode=0o700, exist_ok=True)
+    tmp = os.path.join(mdir, f".{terminal_id}.{os.getpid()}.tmp")
+    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"agy:{cid}\n{now}\n{cwd}\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, mfile)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+
+def main():
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        print("{}")
+        return
+
+    try:
+        cid = (
+            data.get("conversationId")
+            or data.get("conversation_id")
+            or data.get("sessionId")
+            or data.get("session_id")
+            or ""
+        ).strip()
+        cwd = (data.get("cwd") or "").strip()
+        if not cwd:
+            wpaths = data.get("workspacePaths") or data.get("workspace_paths") or []
+            if isinstance(wpaths, list) and wpaths and isinstance(wpaths[0], str):
+                cwd = wpaths[0]
+        if not cwd:
+            cwd = os.getcwd()
+        agy_home = os.path.expanduser(
+            os.environ.get("AGY_HOME") or "~/.gemini/antigravity-cli"
+        )
+        if cid:
+            record_restore_marker(agy_home, cid, cwd)
+    except Exception:
+        pass
+
+    print("{}")
+
+
+if __name__ == "__main__":
+    main()

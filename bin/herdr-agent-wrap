@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""Wrap interactive agy/opencode sessions in herdr-core to clean up restore markers on normal exit."""
+
+from datetime import datetime, timezone
+import os
+import re
+import signal
+import socket
+import subprocess
+import sys
+
+SUPPORTED_AGENTS = {"agy", "opencode"}
+TERMINAL_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+SESSION_REF_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+STALE_SECONDS = 30 * 24 * 60 * 60
+
+COMMON_HELP_FLAGS = {"-h", "--help", "-v", "--version"}
+AGY_PRINT_FLAGS = {"-p", "--print", "--prompt"}
+AGY_SUBCOMMANDS = {
+    "acp",
+    "agent",
+    "agents",
+    "changelog",
+    "help",
+    "install",
+    "mcp",
+    "mic-serve",
+    "models",
+    "plugin",
+    "plugins",
+    "remote-control",
+    "update",
+}
+OPENCODE_SUBCOMMANDS = {
+    "upgrade",
+    "update",
+    "uninstall",
+    "acp",
+    "api",
+    "debug",
+    "auth",
+    "mcp",
+    "plugin",
+    "models",
+    "stats",
+    "run",
+    "session",
+    "service",
+    "reload",
+    "machine",
+    "pair",
+    "serve",
+}
+
+
+def marker_dir_and_file():
+    terminal_id = os.environ.get("HC_TERMINAL_ID", "")
+    if not TERMINAL_ID_RE.match(terminal_id):
+        return None, None
+    state_home = os.environ.get("XDG_STATE_HOME") or os.path.join(
+        os.path.expanduser("~"), ".local", "state"
+    )
+    session_name = re.sub(
+        r"[^A-Za-z0-9_.-]", "_", os.environ.get("HC_SESSION") or "default"
+    )
+    mdir = os.path.join(state_home, "herdr-app", "agent-restore", session_name)
+    return mdir, os.path.join(mdir, terminal_id)
+
+
+def prune_old_markers(mdir):
+    try:
+        names = os.listdir(mdir)
+    except OSError:
+        return
+    cutoff = datetime.now(timezone.utc).timestamp() - STALE_SECONDS
+    for name in names:
+        path = os.path.join(mdir, name)
+        try:
+            if os.path.isfile(path) and os.stat(path).st_mtime < cutoff:
+                os.unlink(path)
+        except OSError:
+            pass
+
+
+def write_marker(mdir, mfile, agent, ref, cwd):
+    prune_old_markers(mdir)
+    os.makedirs(mdir, mode=0o700, exist_ok=True)
+    tmp = os.path.join(mdir, f".{os.path.basename(mfile)}.{os.getpid()}.tmp")
+    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(f"{agent}:{ref}\n{now}\n{cwd}\n")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, mfile)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def first_positional(args, value_flags):
+    skip_next = False
+    for arg in args:
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--":
+            continue
+        if arg in value_flags:
+            skip_next = True
+            continue
+        if arg.startswith("-"):
+            continue
+        return arg
+    return None
+
+
+def is_non_interactive(agent, args):
+    if any(a in COMMON_HELP_FLAGS for a in args):
+        return True
+    if agent == "agy":
+        if any(a in AGY_PRINT_FLAGS or a.startswith("--prompt=") or a.startswith("--print=") for a in args):
+            return True
+        pos = first_positional(
+            args,
+            {
+                "--add-dir",
+                "--agent",
+                "--conversation",
+                "-r",
+                "--resume",
+                "--effort",
+                "--input-format",
+                "--json-schema",
+                "--log-file",
+                "--mode",
+                "--model",
+                "--output-format",
+                "--print-timeout",
+                "--project",
+                "--prompt-interactive",
+                "-i",
+                "--settings",
+            },
+        )
+        return pos in AGY_SUBCOMMANDS
+    if agent == "opencode":
+        pos = first_positional(args, {"--server", "--session", "-s", "--prompt", "--log-level", "--completions"})
+        return pos in OPENCODE_SUBCOMMANDS
+    return False
+
+
+def extract_flag_value(args, names):
+    for i, arg in enumerate(args):
+        if arg in names and i + 1 < len(args):
+            return args[i + 1]
+        for name in names:
+            if name.startswith("--") and arg.startswith(f"{name}="):
+                return arg.split("=", 1)[1]
+    return None
+
+
+def maybe_write_proactive_marker(mdir, mfile, agent, args):
+    try:
+        if agent == "agy":
+            cid = (extract_flag_value(args, {"--resume", "--conversation", "-r"}) or "").strip()
+            if cid and SESSION_REF_RE.match(cid):
+                agy_home = os.path.expanduser(
+                    os.environ.get("AGY_HOME") or "~/.gemini/antigravity-cli"
+                )
+                if os.path.isfile(os.path.join(agy_home, "conversations", f"{cid}.db")):
+                    write_marker(mdir, mfile, "agy", cid, os.getcwd())
+        elif agent == "opencode":
+            sid = (extract_flag_value(args, {"--session", "-s"}) or "").strip()
+            if sid and SESSION_REF_RE.match(sid):
+                write_marker(mdir, mfile, "opencode", sid, os.getcwd())
+    except Exception:
+        pass
+
+
+def core_is_reachable(timeout=0.3):
+    sock_path = os.environ.get("HC_TERMINAL_SOCKET", "")
+    if not sock_path or sys.platform == "win32":
+        return True
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        s.settimeout(timeout)
+        s.connect(sock_path)
+        return True
+    except OSError:
+        return False
+    finally:
+        try:
+            s.close()
+        except OSError:
+            pass
+
+
+def remove_marker_if_owned(mfile, agent):
+    try:
+        with open(mfile, "r", encoding="utf-8") as f:
+            line1 = f.readline().rstrip("\r\n")
+        if line1.startswith(f"{agent}:"):
+            os.unlink(mfile)
+    except OSError:
+        pass
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in SUPPORTED_AGENTS:
+        sys.stderr.write("usage: herdr-agent-wrap <agy|opencode> [args...]\n")
+        sys.exit(2)
+
+    agent = sys.argv[1]
+    args = sys.argv[2:]
+
+    mdir, mfile = marker_dir_and_file()
+    if (
+        not mfile
+        or os.environ.get("_HC_AGENT_WRAP_ACTIVE") == "1"
+        or is_non_interactive(agent, args)
+    ):
+        os.execvp(agent, [agent, *args])
+
+    maybe_write_proactive_marker(mdir, mfile, agent, args)
+
+    env = os.environ.copy()
+    env["_HC_AGENT_WRAP_ACTIVE"] = "1"
+
+    received_shutdown = False
+    proc = None
+
+    # Use a Python handler (not SIG_IGN) so the child resets SIGINT to SIG_DFL on exec.
+    signal.signal(signal.SIGINT, lambda *_args: None)
+
+    def on_shutdown(signum, _frame):
+        nonlocal received_shutdown
+        received_shutdown = True
+        if proc is not None and proc.poll() is None:
+            try:
+                os.kill(proc.pid, signum)
+            except OSError:
+                pass
+
+    signal.signal(signal.SIGHUP, on_shutdown)
+    signal.signal(signal.SIGTERM, on_shutdown)
+
+    try:
+        proc = subprocess.Popen([agent, *args], env=env)
+    except FileNotFoundError:
+        sys.stderr.write(f"{agent}: command not found\n")
+        sys.exit(127)
+
+    while True:
+        try:
+            rc = proc.wait()
+            break
+        except InterruptedError:
+            continue
+
+    if (
+        not received_shutdown
+        and not os.path.exists("/run/nologin")
+        and core_is_reachable(0.3)
+    ):
+        remove_marker_if_owned(mfile, agent)
+
+    if rc < 0:
+        sys.exit(128 + (-rc))
+    sys.exit(rc)
+
+
+if __name__ == "__main__":
+    main()

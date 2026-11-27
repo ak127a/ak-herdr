@@ -1,11 +1,15 @@
 #!/bin/sh
-# Install this Herdr setup: the "tmux" layout, its mods and the shortcuts.
+# Install this Herdr setup: the "tmux" layout, its mods, shortcuts, and
+# session restore for installed agents (agy, opencode, pi).
 # Existing files are kept under $app/backups/<date>/.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 app=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
 agy_home=${AGY_HOME:-$HOME/.gemini/antigravity-cli}
+opencode_home=${OPENCODE_CONFIG_HOME:-$HOME/.config/opencode}
+gemini_config=${GEMINI_CONFIG_HOME:-$HOME/.gemini/config}
+pi_home=${PI_HOME:-$HOME/.pi/agent}
 os=${HERDR_SETUP_OS:-$(uname -s)}
 mac_mod=${MAC_MOD:-cmd}
 stamp=$(date +%Y%m%d-%H%M%S)
@@ -23,6 +27,29 @@ backup_rel() {
   mkdir -p "$backup_root/$(dirname -- "$rel")"
   cp -R "$app/$rel" "$backup_root/$rel"
   say "  kept $backup_root/$rel"
+}
+
+# Install a single managed file outside/inside $app with backup and idempotency.
+install_managed_file() {
+  src=$1
+  dst=$2
+  backup_subrel=$3
+  mode=$4
+  label=$5
+  if [ -f "$dst" ] && cmp -s "$src" "$dst"; then
+    chmod "$mode" "$dst" 2>/dev/null || true
+    say "$label (unchanged)"
+    return 0
+  fi
+  if [ -e "$dst" ]; then
+    mkdir -p "$backup_root/$(dirname -- "$backup_subrel")"
+    cp "$dst" "$backup_root/$backup_subrel"
+    say "  kept $backup_root/$backup_subrel"
+  fi
+  mkdir -p "$(dirname -- "$dst")"
+  cp "$src" "$dst"
+  chmod "$mode" "$dst"
+  say "$label"
 }
 
 # Herdr generates IDE/diagnostic files inside mod directories; preserve them.
@@ -95,66 +122,26 @@ sync_mod() {
   say "mod     mods/$m"
 }
 
-command -v herdr-app >/dev/null 2>&1 || say "note: herdr-app is not on PATH; copying files anyway"
+merge_json_key() {
+  json_path=$1
+  key_name=$2
+  target_json=$3
+  backup_subrel=$4
+  label=$5
+  invalid_note=$6
 
-mkdir -p "$app/layouts" "$app/mods"
-
-# Install mods first so keys.json and layouts/tmux.json never see a missing mod.
-for m in $MODS; do
-  sync_mod "$m"
-done
-
-# Ctrl+Space Shift+O runs this wrapper: one OpenCode session per Herdr tab.
-if command -v opencode >/dev/null 2>&1; then
-  mkdir -p "$HOME/.local/bin"
-  if [ -f "$HOME/.local/bin/opencode-herdr" ] && cmp -s "$here/bin/opencode-herdr" "$HOME/.local/bin/opencode-herdr"; then
-    chmod +x "$HOME/.local/bin/opencode-herdr"
-    say "bin     ~/.local/bin/opencode-herdr (unchanged)"
-  else
-    cp "$here/bin/opencode-herdr" "$HOME/.local/bin/opencode-herdr"
-    chmod +x "$HOME/.local/bin/opencode-herdr"
-    say "bin     ~/.local/bin/opencode-herdr"
-  fi
-  case ":$PATH:" in
-    *":$HOME/.local/bin:"*) ;;
-    *) say "note: ~/.local/bin is not on this shell's PATH; add it so Herdr can run opencode-herdr" ;;
-  esac
-else
-  say "bin     opencode not found (skipped)"
-fi
-
-# Antigravity (agy) window title script + settings.json "title" block so live
-# conversation names (including auto-generated titles and /rename) show in Herdr.
-if command -v agy >/dev/null 2>&1; then
-  mkdir -p "$agy_home"
-  if [ -f "$agy_home/title.sh" ] && cmp -s "$here/bin/agy-title" "$agy_home/title.sh"; then
-    chmod +x "$agy_home/title.sh"
-    say "agy     $agy_home/title.sh (unchanged)"
-  else
-    if [ -e "$agy_home/title.sh" ]; then
-      mkdir -p "$backup_root/antigravity-cli"
-      cp "$agy_home/title.sh" "$backup_root/antigravity-cli/title.sh"
-      say "  kept $backup_root/antigravity-cli/title.sh"
-    fi
-    cp "$here/bin/agy-title" "$agy_home/title.sh"
-    chmod +x "$agy_home/title.sh"
-    say "agy     $agy_home/title.sh"
+  if ! command -v python3 >/dev/null 2>&1; then
+    say "note: python3 is not on PATH; skipping $label"
+    return 0
   fi
 
-  if [ "$agy_home" = "$HOME/.gemini/antigravity-cli" ]; then
-    agy_title_cmd="~/.gemini/antigravity-cli/title.sh"
-  else
-    agy_title_cmd="$agy_home/title.sh"
-  fi
-
-  if command -v python3 >/dev/null 2>&1; then
-    agy_settings_status=$(python3 - "$agy_home/settings.json" "$agy_title_cmd" <<'PY'
+  status=$(python3 - "$json_path" "$key_name" "$target_json" <<'PY'
 import json
 import os
 import sys
 
-path, cmd = sys.argv[1], sys.argv[2]
-target = {"type": "command", "command": cmd, "enabled": True}
+path, key, target_raw = sys.argv[1], sys.argv[2], sys.argv[3]
+target = json.loads(target_raw)
 
 if os.path.exists(path):
     try:
@@ -171,11 +158,12 @@ else:
     data = {}
     mode = 0o600
 
-if data.get("title") == target:
+if data.get(key) == target:
     print("unchanged")
     sys.exit(0)
 
-data["title"] = target
+data[key] = target
+os.makedirs(os.path.dirname(path), exist_ok=True)
 tmp = path + ".new"
 fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
 with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -185,28 +173,234 @@ os.chmod(tmp, mode)
 print("changed")
 PY
 )
-    case "$agy_settings_status" in
-      unchanged)
-        say "agy     $agy_home/settings.json (unchanged)"
-        ;;
-      changed)
-        if [ -e "$agy_home/settings.json" ]; then
-          mkdir -p "$backup_root/antigravity-cli"
-          cp "$agy_home/settings.json" "$backup_root/antigravity-cli/settings.json"
-          say "  kept $backup_root/antigravity-cli/settings.json"
-        fi
-        mv "$agy_home/settings.json.new" "$agy_home/settings.json"
-        say "agy     $agy_home/settings.json"
-        ;;
-      *)
-        say "note: $agy_home/settings.json is not valid JSON; skipping title config"
-        ;;
-    esac
-  else
-    say "note: python3 is not on PATH; skipping $agy_home/settings.json title config"
+  case "$status" in
+    unchanged)
+      say "$label (unchanged)"
+      ;;
+    changed)
+      if [ -e "$json_path" ]; then
+        mkdir -p "$backup_root/$(dirname -- "$backup_subrel")"
+        cp "$json_path" "$backup_root/$backup_subrel"
+        say "  kept $backup_root/$backup_subrel"
+      fi
+      mv "$json_path.new" "$json_path"
+      say "$label"
+      ;;
+    *)
+      say "note: $invalid_note"
+      ;;
+  esac
+}
+
+wire_shell_rc() {
+  rc_file=$1
+  rc_name=$(basename -- "$rc_file")
+  if ! command -v python3 >/dev/null 2>&1; then
+    say "note: python3 is not on PATH; skipping $rc_file restore wiring"
+    return 0
   fi
+
+  status=$(python3 - "$rc_file" <<'PY'
+import os
+import re
+import sys
+
+path = sys.argv[1]
+begin = "# >>> ak-herdr restore >>>"
+end = "# <<< ak-herdr restore <<<"
+block = (
+    f"{begin}\n"
+    '[ -r "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/restore/shell-hook.sh" ] && '
+    '. "${HERDR_APP_HOME:-$HOME/.config/herdr-app}/restore/shell-hook.sh"\n'
+    f"{end}"
+)
+
+if os.path.exists(path):
+    with open(path, "r", encoding="utf-8") as f:
+        orig = f.read()
+    mode = os.stat(path).st_mode & 0o777
+else:
+    orig = ""
+    mode = 0o644
+
+managed_re = re.compile(rf"(?ms)^{re.escape(begin)}\n.*?^{re.escape(end)}$")
+legacy_re = re.compile(
+    r"(?ms)^# Resume the pi conversation after herdr-core replaces a lost terminal.*?"
+    r"unset _hc_ns _hc_marker _hc_parent _hc_sess\nfi"
+)
+
+if managed_re.search(orig):
+    updated = managed_re.sub(lambda _m: block, orig, count=1)
+elif legacy_re.search(orig):
+    updated = legacy_re.sub(lambda _m: block, orig, count=1)
+else:
+    sep = "" if (not orig or orig.endswith("\n")) else "\n"
+    if orig.strip():
+        updated = f"{orig}{sep}\n{block}\n"
+    else:
+        updated = f"{block}\n"
+
+if updated == orig:
+    print("unchanged")
+    sys.exit(0)
+
+os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+tmp = path + ".ak-herdr.new"
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    f.write(updated)
+os.chmod(tmp, mode)
+print("changed")
+PY
+)
+  case "$status" in
+    unchanged)
+      say "shell   $rc_file (unchanged)"
+      ;;
+    changed)
+      if [ -e "$rc_file" ]; then
+        mkdir -p "$backup_root/shell"
+        cp "$rc_file" "$backup_root/shell/$rc_name"
+        say "  kept $backup_root/shell/$rc_name"
+      fi
+      mv "$rc_file.ak-herdr.new" "$rc_file"
+      say "shell   $rc_file"
+      ;;
+  esac
+}
+
+command -v herdr-app >/dev/null 2>&1 || say "note: herdr-app is not on PATH; copying files anyway"
+
+mkdir -p "$app/layouts" "$app/mods"
+
+# Install mods first so keys.json and layouts/tmux.json never see a missing mod.
+for m in $MODS; do
+  sync_mod "$m"
+done
+
+has_opencode=0; command -v opencode >/dev/null 2>&1 && has_opencode=1
+has_agy=0; command -v agy >/dev/null 2>&1 && has_agy=1
+has_pi=0; command -v pi >/dev/null 2>&1 && has_pi=1
+
+# OpenCode: wrapper (HERDR_ENV=1) + V2 TUI restore plugin.
+if [ "$has_opencode" -eq 1 ]; then
+  install_managed_file \
+    "$here/bin/opencode-herdr" \
+    "$HOME/.local/bin/opencode-herdr" \
+    "bin/opencode-herdr" \
+    755 \
+    "bin     ~/.local/bin/opencode-herdr"
+  install_managed_file \
+    "$here/restore/opencode/tui.js" \
+    "$opencode_home/plugins/herdr-app-restore/tui.js" \
+    "opencode/plugins/herdr-app-restore/tui.js" \
+    644 \
+    "opencode $opencode_home/plugins/herdr-app-restore/tui.js"
+else
+  say "opencode not found (skipped)"
+fi
+
+# Antigravity (agy): title.sh + settings.json "title" + restore-hook.py + hooks.json.
+if [ "$has_agy" -eq 1 ]; then
+  install_managed_file \
+    "$here/bin/agy-title" \
+    "$agy_home/title.sh" \
+    "antigravity-cli/title.sh" \
+    755 \
+    "agy     $agy_home/title.sh"
+
+  if [ "$agy_home" = "$HOME/.gemini/antigravity-cli" ]; then
+    agy_title_cmd="~/.gemini/antigravity-cli/title.sh"
+    agy_hook_cmd="~/.gemini/antigravity-cli/restore-hook.py"
+  else
+    agy_title_cmd="$agy_home/title.sh"
+    agy_hook_cmd="$agy_home/restore-hook.py"
+  fi
+
+  merge_json_key \
+    "$agy_home/settings.json" \
+    "title" \
+    "{\"type\":\"command\",\"command\":\"$agy_title_cmd\",\"enabled\":true}" \
+    "antigravity-cli/settings.json" \
+    "agy     $agy_home/settings.json" \
+    "$agy_home/settings.json is not valid JSON; skipping title config"
+
+  install_managed_file \
+    "$here/restore/agy/restore-hook.py" \
+    "$agy_home/restore-hook.py" \
+    "antigravity-cli/restore-hook.py" \
+    755 \
+    "agy     $agy_home/restore-hook.py"
+
+  hook_target="{\"SessionStart\":[{\"type\":\"command\",\"command\":\"$agy_hook_cmd\",\"timeout\":5}],\"Stop\":[{\"type\":\"command\",\"command\":\"$agy_hook_cmd\",\"timeout\":5}]}"
+  merge_json_key \
+    "$gemini_config/hooks.json" \
+    "herdr-app-restore" \
+    "$hook_target" \
+    "gemini-config/hooks.json" \
+    "agy     $gemini_config/hooks.json" \
+    "$gemini_config/hooks.json is not valid JSON; skipping restore hook config"
 else
   say "agy     not found (skipped)"
+fi
+
+# Pi: session-restore extension.
+if [ "$has_pi" -eq 1 ]; then
+  install_managed_file \
+    "$here/restore/pi/herdr-app-restore.ts" \
+    "$pi_home/extensions/herdr-app-restore.ts" \
+    "pi/extensions/herdr-app-restore.ts" \
+    644 \
+    "pi      $pi_home/extensions/herdr-app-restore.ts"
+else
+  say "pi      not found (skipped)"
+fi
+
+# Shared restore wrappers, shell hook, and selftest: only installed when at least
+# one supported agent is present on PATH.
+if [ "$has_agy" -eq 1 ] || [ "$has_opencode" -eq 1 ]; then
+  install_managed_file \
+    "$here/bin/herdr-agent-wrap" \
+    "$HOME/.local/bin/herdr-agent-wrap" \
+    "bin/herdr-agent-wrap" \
+    755 \
+    "bin     ~/.local/bin/herdr-agent-wrap"
+fi
+
+if [ "$has_agy" -eq 1 ] || [ "$has_opencode" -eq 1 ] || [ "$has_pi" -eq 1 ]; then
+  install_managed_file \
+    "$here/bin/herdr-restore-selftest" \
+    "$HOME/.local/bin/herdr-restore-selftest" \
+    "bin/herdr-restore-selftest" \
+    755 \
+    "bin     ~/.local/bin/herdr-restore-selftest"
+
+  install_managed_file \
+    "$here/restore/shell-hook.sh" \
+    "$app/restore/shell-hook.sh" \
+    "restore/shell-hook.sh" \
+    644 \
+    "restore $app/restore/shell-hook.sh"
+
+  wire_shell_rc "$HOME/.bashrc"
+  need_zsh=0
+  if [ -f "$HOME/.zshrc" ] || [ "$os" = "Darwin" ]; then
+    need_zsh=1
+  else
+    case "${SHELL:-}" in
+      */zsh) need_zsh=1 ;;
+    esac
+  fi
+  if [ "$need_zsh" -eq 1 ]; then
+    wire_shell_rc "$HOME/.zshrc"
+  fi
+
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) say "note: ~/.local/bin is not on this shell's PATH; add it so Herdr can run installed wrappers" ;;
+  esac
+else
+  say "restore no supported agents found (skipped)"
 fi
 
 if [ -f "$app/layouts/tmux.json" ] && cmp -s "$here/layouts/tmux.json" "$app/layouts/tmux.json"; then

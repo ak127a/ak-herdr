@@ -1,0 +1,422 @@
+#!/usr/bin/env bash
+# End-to-end check of herdr-app agent-restore across a lost herdr-core
+# (simulating reboot / core crash / `hc server stop`) for installed agents.
+#
+# Usage: herdr-restore-selftest [all|agy|opencode|pi]
+#
+# Runs in its own isolated herdr-core session, socket, and state directory so
+# it never touches the running herdr-app/core or your real terminals.
+set -uo pipefail
+
+TARGET="${1:-all}"
+case "$TARGET" in
+  all|agy|opencode|pi) ;;
+  *)
+    echo "usage: herdr-restore-selftest [all|agy|opencode|pi]" >&2
+    exit 2
+    ;;
+esac
+
+SELF="herdr-restore-selftest-$$"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}"
+TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/$SELF.XXXXXX")
+MARKERS=""
+CORE_STATE=""
+
+stop_current_session() {
+  [ -n "${HC_SOCKET:-}" ] || return 0
+  if [ -S "$HC_SOCKET" ]; then
+    local addr
+    for addr in $(hc ls --json 2>/dev/null | jget 'print(" ".join(t["address"] for t in d.get("terminals", [])))'); do
+      hc rm -f "$addr" >/dev/null 2>&1 || true
+    done
+    hc server stop >/dev/null 2>&1 || true
+    sleep 0.5
+  fi
+}
+
+cleanup() {
+  local s
+  for s in "" "-agy" "-opencode" "-pi"; do
+    export HC_SESSION="${SELF}${s}"
+    export HC_SOCKET="${TMPDIR:-/tmp}/${HC_SESSION}.sock"
+    stop_current_session
+  done
+  rm -rf "$STATE/herdr-app/agent-restore/${SELF}"* "$STATE/herdr-core/${SELF}"* "${TMPDIR:-/tmp}/${SELF}"*
+}
+trap cleanup EXIT
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+jget() { python3 -c "import sys,json;d=json.load(sys.stdin);$1" 2>/dev/null; }
+
+command -v hc >/dev/null || fail "hc not on PATH"
+command -v python3 >/dev/null || fail "python3 not on PATH"
+
+reset_isolated_core() {
+  local suite="${1:-default}"
+  stop_current_session
+  export HC_SESSION="${SELF}-${suite}"
+  export HC_SOCKET="${TMPDIR:-/tmp}/${HC_SESSION}.sock"
+  MARKERS="$STATE/herdr-app/agent-restore/$HC_SESSION"
+  CORE_STATE="$STATE/herdr-core/$HC_SESSION"
+  rm -rf "$MARKERS" "$CORE_STATE" "$HC_SOCKET"
+}
+
+wait_for_addr() {
+  local name=$1
+  local addr=""
+  for _ in $(seq 1 40); do
+    sleep 0.5
+    addr=$(hc ls --json 2>/dev/null | jget "a=[t['address'] for t in d['terminals'] if t.get('name')=='$name'];print(a[0] if a else '')")
+    [ -n "$addr" ] && break
+  done
+  printf '%s' "$addr"
+}
+
+simulate_reboot() {
+  local addr=$1
+  local marker=$2
+  local corepid fgpid holder
+  corepid=$(hc server status --json | jget 'print(d["pid"])')
+  fgpid=$(hc get "$addr" --json | jget 'print((d.get("foreground") or {}).get("pid") or d.get("pid") or "")')
+  holder=$(ps -o ppid= -p "$fgpid" 2>/dev/null | tr -d ' ')
+  [ -n "$corepid" ] && [ -n "$holder" ] || fail "could not find core/holder pids (core=$corepid fg=$fgpid holder=$holder)"
+
+  # When wrapped (e.g. herdr-agent-wrap -> agy), walk up to the herdr-core hold parent.
+  while [ -n "$holder" ] && [ "$holder" != "1" ]; do
+    if ps -o args= -p "$holder" 2>/dev/null | grep -q 'herdr-core.*hold'; then
+      break
+    fi
+    holder=$(ps -o ppid= -p "$holder" 2>/dev/null | tr -d ' ')
+  done
+  [ -n "$holder" ] && [ "$holder" != "1" ] || fail "could not locate herdr-core holder pid"
+
+  echo "   simulating reboot: core ($corepid) first, then holder ($holder)"
+  kill -9 "$corepid" 2>/dev/null || true
+  sleep 1
+  kill -TERM "$holder" 2>/dev/null || true
+  sleep 2
+  [ -f "$marker" ] || fail "marker was deleted when core/holder died ($marker)"
+  echo "   marker survived"
+}
+
+wait_for_recovered_cmdline() {
+  local addr=$1
+  local pattern_a=$2
+  local pattern_b=$3
+  local check_herdr_env=${4:-0}
+  local spid child cmdline
+  for _ in $(seq 1 60); do
+    sleep 0.5
+    spid=$(hc get "$addr" --json 2>/dev/null | jget 'print(d.get("pid") or "")')
+    [ -n "$spid" ] || continue
+    for child in $(pgrep -P "$spid" 2>/dev/null); do
+      cmdline=$(tr '\0' ' ' < /proc/"$child"/cmdline 2>/dev/null || true)
+      if [[ "$cmdline" == *"$pattern_a"* && "$cmdline" == *"$pattern_b"* ]]; then
+        if [ "$check_herdr_env" = "1" ]; then
+          if ! tr '\0' '\n' < /proc/"$child"/environ 2>/dev/null | grep -qx 'HERDR_ENV=1'; then
+            continue
+          fi
+        fi
+        printf '%s' "$cmdline"
+        return 0
+      fi
+    done
+    # Also check grandchildren in case a wrapper spawned the agent.
+    for child in $(pgrep -P "$spid" 2>/dev/null); do
+      for grand in $(pgrep -P "$child" 2>/dev/null); do
+        cmdline=$(tr '\0' ' ' < /proc/"$grand"/cmdline 2>/dev/null || true)
+        if [[ "$cmdline" == *"$pattern_a"* && "$cmdline" == *"$pattern_b"* ]]; then
+          if [ "$check_herdr_env" = "1" ]; then
+            if ! tr '\0' '\n' < /proc/"$grand"/environ 2>/dev/null | grep -qx 'HERDR_ENV=1'; then
+              continue
+            fi
+          fi
+          printf '%s' "$cmdline"
+          return 0
+        fi
+      done
+    done
+  done
+  return 1
+}
+
+assert_foreground_not_shell() {
+  local addr=$1
+  local label=$2
+  local info=""
+  for _ in $(seq 1 20); do
+    info=$(hc get "$addr" --json 2>/dev/null | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+spid = d.get("pid")
+fg = d.get("foreground") or {}
+fg_pid = fg.get("pid")
+fg_name = (fg.get("name") or "").strip()
+shells = {"", "bash", "zsh", "sh", "dash", "ksh", "fish"}
+if fg_pid and spid and fg_pid != spid and fg_name not in shells:
+    print(f"{fg_name} (pid {fg_pid}, shell pid {spid})")
+' 2>/dev/null) || info=""
+    if [ -n "$info" ]; then
+      echo "   foreground verified: $info"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "--- debug on foreground check failure ---" >&2
+  hc get "$addr" --json >&2 || true
+  fail "$label: recovered pane foreground is still shell (expected agent/wrapper PGID)"
+}
+
+test_agy() {
+  echo "== Testing Antigravity (agy) restore"
+  command -v agy >/dev/null || fail "agy not on PATH"
+  command -v herdr-agent-wrap >/dev/null || fail "herdr-agent-wrap not on PATH"
+
+  local agy_home="${AGY_HOME:-$HOME/.gemini/antigravity-cli}"
+  local title_script="$agy_home/title.sh"
+  local hook_script="$agy_home/restore-hook.py"
+  [ -x "$title_script" ] || fail "missing $title_script (run install.sh first)"
+  [ -x "$hook_script" ] || fail "missing $hook_script (run install.sh first)"
+
+  # 1. Unit check for title.sh and restore-hook.py (marker creation, stdout cleanliness, subagent skip).
+  local unit_agy="$TMP_ROOT/agy-unit"
+  local unit_state="$TMP_ROOT/state-unit"
+  local root_cid="11111111-1111-1111-1111-111111111111"
+  local sub_cid="22222222-2222-2222-2222-222222222222"
+  local missing_cid="33333333-3333-3333-3333-333333333333"
+  mkdir -p "$unit_agy/conversations" "$unit_state"
+  : > "$unit_agy/conversations/$root_cid.db"
+  : > "$unit_agy/conversations/$sub_cid.db"
+  python3 - "$unit_agy/conversation_summaries.db" "$root_cid" "$sub_cid" <<'PY'
+import sqlite3, sys
+db, root_cid, sub_cid = sys.argv[1:]
+con = sqlite3.connect(db)
+con.execute("CREATE TABLE conversation_summaries (conversation_id text PRIMARY KEY, title text, parent_conversation_id text, nesting_depth integer)")
+con.execute("CREATE TABLE conversation_parents (conversation_id TEXT PRIMARY KEY, parent_id TEXT NOT NULL)")
+con.execute("INSERT INTO conversation_summaries VALUES (?, 'Root Title', '', 0)", (root_cid,))
+con.execute("INSERT INTO conversation_summaries VALUES (?, 'Sub Title', ?, 1)", (sub_cid, root_cid))
+con.execute("INSERT INTO conversation_parents VALUES (?, ?)", (sub_cid, root_cid))
+con.commit()
+con.close()
+PY
+
+  local out
+  out=$(AGY_HOME="$unit_agy" XDG_STATE_HOME="$unit_state" HC_TERMINAL_ID="tunit1" HC_SESSION="$SELF" \
+    "$title_script" <<< "{\"conversation_id\":\"$root_cid\",\"conversation_title\":\"Root Title\",\"cwd\":\"/tmp\"}")
+  [ "$out" = "Root Title" ] || fail "title.sh stdout mismatch: got '$out'"
+  local umarker="$unit_state/herdr-app/agent-restore/$SELF/tunit1"
+  [ -f "$umarker" ] || fail "title.sh did not write restore marker"
+  [ "$(head -n 1 "$umarker")" = "agy:$root_cid" ] || fail "title.sh marker line 1 mismatch: $(head -n 1 "$umarker")"
+
+  rm -f "$umarker"
+  out=$(AGY_HOME="$unit_agy" XDG_STATE_HOME="$unit_state" HC_TERMINAL_ID="tunit1" HC_SESSION="$SELF" \
+    "$hook_script" <<< "{\"conversationId\":\"$root_cid\",\"cwd\":\"/tmp\"}")
+  [ "$out" = "{}" ] || fail "restore-hook.py stdout mismatch: got '$out'"
+  [ -f "$umarker" ] || fail "restore-hook.py did not write restore marker"
+  [ "$(head -n 1 "$umarker")" = "agy:$root_cid" ] || fail "restore-hook.py marker line 1 mismatch"
+
+  # Subagent & missing .db must not write/overwrite a marker.
+  rm -f "$umarker"
+  AGY_HOME="$unit_agy" XDG_STATE_HOME="$unit_state" HC_TERMINAL_ID="tunit1" HC_SESSION="$SELF" \
+    "$hook_script" <<< "{\"conversationId\":\"$sub_cid\",\"cwd\":\"/tmp\"}" >/dev/null
+  [ ! -e "$umarker" ] || fail "restore-hook.py wrote marker for subagent conversation"
+  AGY_HOME="$unit_agy" XDG_STATE_HOME="$unit_state" HC_TERMINAL_ID="tunit1" HC_SESSION="$SELF" \
+    "$title_script" <<< "{\"conversation_id\":\"$missing_cid\",\"conversation_title\":\"Missing\"}" >/dev/null
+  [ ! -e "$umarker" ] || fail "title.sh wrote marker when .db does not exist"
+  echo "   agy-title and restore-hook.py unit checks passed"
+
+  # 2. Live isolated herdr-core clean-exit and reboot recovery checks.
+  reset_isolated_core agy
+  hc server start >/dev/null || fail "could not start isolated core"
+
+  # Clean-exit wrapper check using a temporary agy stub while isolated core socket is reachable.
+  local stub_bin="$TMP_ROOT/stub-bin"
+  mkdir -p "$stub_bin"
+  cat > "$stub_bin/agy" <<'EOF'
+#!/bin/sh
+sleep 0.2
+exit 0
+EOF
+  chmod +x "$stub_bin/agy"
+  PATH="$stub_bin:$PATH" AGY_HOME="$unit_agy" XDG_STATE_HOME="$unit_state" \
+    HC_TERMINAL_ID="tclean1" HC_SESSION="$SELF" HC_TERMINAL_SOCKET="$HC_SOCKET" \
+    herdr-agent-wrap agy --resume "$root_cid"
+  [ ! -e "$unit_state/herdr-app/agent-restore/$SELF/tclean1" ] || fail "herdr-agent-wrap did not remove marker on clean exit"
+  echo "   herdr-agent-wrap clean-exit check passed"
+
+  # Pick a real read-only conversation ID from AGY_HOME (never sending any prompt to it).
+  local cid
+  cid=$(find "$agy_home/conversations" -maxdepth 1 -name '*.db' -printf '%f\n' 2>/dev/null | sed 's/\.db$//' | head -n 1)
+  [ -n "$cid" ] || fail "no existing Antigravity conversation .db found in $agy_home/conversations to resume"
+  echo "   using existing read-only conversation: $cid"
+
+  hc run --bg --keep --name agy-selftest herdr-agent-wrap agy --resume "$cid" >/dev/null || fail "could not start agy-selftest"
+  local addr
+  addr=$(wait_for_addr "agy-selftest")
+  [ -n "$addr" ] || fail "agy-selftest terminal did not start"
+
+  local marker="$MARKERS/$addr"
+  for _ in $(seq 1 40); do sleep 0.5; [ -f "$marker" ] && break; done
+  [ -f "$marker" ] || fail "herdr-agent-wrap did not write agy marker at $marker"
+  [ "$(head -n 1 "$marker")" = "agy:$cid" ] || fail "unexpected marker line 1: $(head -n 1 "$marker")"
+  echo "   recorded marker: $(head -n 1 "$marker")"
+
+  simulate_reboot "$addr" "$marker"
+
+  echo "   restarting isolated core"
+  hc server start >/dev/null || fail "could not restart isolated core"
+  local resumed
+  resumed=$(wait_for_recovered_cmdline "$addr" "agy" "$cid" 0) || true
+  [ -n "$resumed" ] || fail "recovered shell did not restart agy --resume $cid"
+  assert_foreground_not_shell "$addr" "agy"
+  echo "PASS [agy]: recovered pane is running: $resumed"
+}
+
+test_opencode() {
+  echo "== Testing OpenCode restore"
+  command -v opencode >/dev/null || fail "opencode not on PATH"
+  command -v opencode-herdr >/dev/null || fail "opencode-herdr not on PATH"
+  command -v herdr-agent-wrap >/dev/null || fail "herdr-agent-wrap not on PATH"
+  local plugin_file="${OPENCODE_CONFIG_HOME:-$HOME/.config/opencode}/plugins/herdr-app-restore/tui.js"
+  [ -f "$plugin_file" ] || fail "missing $plugin_file (run install.sh first)"
+
+  local oc_db="${XDG_DATA_HOME:-$HOME/.local/share}/opencode/opencode.db"
+  [ -f "$oc_db" ] || fail "missing OpenCode DB at $oc_db"
+
+  local sid
+  sid=$(python3 - "$oc_db" <<'PY'
+import sqlite3, sys
+con = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+row = con.execute("SELECT id FROM session WHERE parent_id IS NULL ORDER BY time_updated DESC LIMIT 1").fetchone()
+print(row[0] if row else "")
+PY
+)
+  [ -n "$sid" ] || fail "no root session found in $oc_db"
+  echo "   using existing read-only OpenCode session: $sid"
+
+  local oc_log="${XDG_DATA_HOME:-$HOME/.local/share}/opencode/log/opencode.log"
+  local log_lines=0
+  [ -f "$oc_log" ] && log_lines=$(wc -l < "$oc_log")
+
+  reset_isolated_core opencode
+  hc server start >/dev/null || fail "could not start isolated core"
+
+  hc run --bg --keep --name oc-selftest opencode-herdr --session "$sid" >/dev/null || fail "could not start oc-selftest"
+  local addr
+  addr=$(wait_for_addr "oc-selftest")
+  [ -n "$addr" ] || fail "oc-selftest terminal did not start"
+
+  local marker="$MARKERS/$addr"
+  for _ in $(seq 1 40); do sleep 0.5; [ -f "$marker" ] && break; done
+  [ -f "$marker" ] || fail "opencode did not write marker at $marker"
+  [ "$(head -n 1 "$marker")" = "opencode:$sid" ] || fail "unexpected marker line 1: $(head -n 1 "$marker")"
+  echo "   recorded marker: $(head -n 1 "$marker")"
+
+  # Give OpenCode TUI a moment to reconcile plugins so we can verify no plugin load errors occurred.
+  sleep 2
+  if [ -f "$oc_log" ]; then
+    if tail -n +"$((log_lines + 1))" "$oc_log" | grep -E "Plugin failed:.*herdr-app-restore|plugin operation failed.*herdr-app-restore" >/dev/null 2>&1; then
+      fail "OpenCode reported a plugin failure for herdr-app-restore in $oc_log"
+    fi
+  fi
+
+  simulate_reboot "$addr" "$marker"
+
+  echo "   restarting isolated core"
+  hc server start >/dev/null || fail "could not restart isolated core"
+  local resumed
+  resumed=$(wait_for_recovered_cmdline "$addr" "opencode" "$sid" 1) || true
+  if [ -z "$resumed" ]; then
+    echo "--- debug on failure ---" >&2
+    hc ls --json >&2 || true
+    hc get "$addr" --json >&2 || true
+    ls -la "$MARKERS" >&2 || true
+    cat "$CORE_STATE/core.log" >&2 || true
+    fail "recovered shell did not restart opencode --session $sid with HERDR_ENV=1"
+  fi
+  assert_foreground_not_shell "$addr" "opencode"
+  echo "PASS [opencode]: recovered pane is running: $resumed"
+}
+
+test_pi() {
+  echo "== Testing Pi restore"
+  command -v pi >/dev/null || fail "pi not on PATH"
+  [ -f "${PI_HOME:-$HOME/.pi/agent}/extensions/herdr-app-restore.ts" ] || fail "missing herdr-app-restore.ts (run install.sh first)"
+
+  reset_isolated_core pi
+  hc server start >/dev/null || fail "could not start isolated core"
+  hc run --bg --keep --name pi-selftest pi >/dev/null || fail "could not start pi"
+
+  local addr
+  addr=$(wait_for_addr "pi-selftest")
+  [ -n "$addr" ] || fail "pi terminal did not start"
+
+  # Wait for pi to report idle so its TUI input loop is ready for hc send.
+  for _ in $(seq 1 40); do
+    if [ "$(hc get "$addr" --json 2>/dev/null | jget 'print((d.get("status") or {}).get("state") or "")')" = "idle" ]; then
+      break
+    fi
+    sleep 0.5
+  done
+
+  echo "   starting a pi turn so it has a session file"
+  local sent=""
+  for _ in $(seq 1 20); do
+    if hc send "$addr" 'self-test: reply with OK' >/dev/null 2>&1; then sent=1; break; fi
+    sleep 0.5
+  done
+  [ -n "$sent" ] || fail "could not send input to pi"
+
+  local marker="$MARKERS/$addr"
+  for _ in $(seq 1 60); do sleep 0.5; [ -f "$marker" ] && break; done
+  [ -f "$marker" ] || fail "pi did not record a resume marker at $marker"
+  echo "   pi recorded session: $(head -n 1 "$marker")"
+
+  simulate_reboot "$addr" "$marker"
+
+  echo "   restarting isolated core"
+  hc server start >/dev/null || fail "could not restart isolated core"
+  local resumed
+  resumed=$(wait_for_recovered_cmdline "$addr" "pi" "--session" 0) || true
+  [ -n "$resumed" ] || fail "the recovered shell did not restart pi (marker: $marker)"
+  assert_foreground_not_shell "$addr" "pi"
+  echo "PASS [pi]: recovered pane is running: $resumed"
+}
+
+ran=0
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "agy" ]; then
+  if command -v agy >/dev/null 2>&1; then
+    test_agy
+    ran=$((ran + 1))
+  elif [ "$TARGET" = "agy" ]; then
+    fail "agy not on PATH"
+  else
+    echo "== Skipping agy (not on PATH)"
+  fi
+fi
+
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "opencode" ]; then
+  if command -v opencode >/dev/null 2>&1; then
+    test_opencode
+    ran=$((ran + 1))
+  elif [ "$TARGET" = "opencode" ]; then
+    fail "opencode not on PATH"
+  else
+    echo "== Skipping opencode (not on PATH)"
+  fi
+fi
+
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "pi" ]; then
+  if command -v pi >/dev/null 2>&1; then
+    test_pi
+    ran=$((ran + 1))
+  elif [ "$TARGET" = "pi" ]; then
+    fail "pi not on PATH"
+  else
+    echo "== Skipping pi (not on PATH)"
+  fi
+fi
+
+[ "$ran" -gt 0 ] || fail "no supported agents (agy, opencode, pi) found on PATH"
+echo "ALL SELECTED SELFTESTS PASSED ($ran suite(s))"

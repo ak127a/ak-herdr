@@ -5,6 +5,9 @@ set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 app=${HERDR_APP_HOME:-$HOME/.config/herdr-app}
+agy_home=${AGY_HOME:-$HOME/.gemini/antigravity-cli}
+opencode_home=${OPENCODE_CONFIG_HOME:-$HOME/.config/opencode}
+pi_home=${PI_HOME:-$HOME/.pi/agent}
 os=${HERDR_SETUP_OS:-$(uname -s)}
 mac_mod=${MAC_MOD:-cmd}
 
@@ -39,16 +42,30 @@ for m in $MODS; do
   done
 done
 
-if [ -f "$HOME/.local/bin/opencode-herdr" ]; then
-  mkdir -p "$here/bin"
-  cp "$HOME/.local/bin/opencode-herdr" "$here/bin/opencode-herdr"
-fi
+sync_bin() {
+  src=$1
+  dst=$2
+  [ -f "$src" ] || return 0
+  mkdir -p "$(dirname -- "$dst")"
+  cp "$src" "$dst"
+  chmod +x "$dst"
+}
 
-agy_home=${AGY_HOME:-$HOME/.gemini/antigravity-cli}
-if [ -f "$agy_home/title.sh" ]; then
-  mkdir -p "$here/bin"
-  cp "$agy_home/title.sh" "$here/bin/agy-title"
-  chmod +x "$here/bin/agy-title"
-fi
+sync_file() {
+  src=$1
+  dst=$2
+  [ -f "$src" ] || return 0
+  mkdir -p "$(dirname -- "$dst")"
+  cp "$src" "$dst"
+}
+
+sync_bin "$HOME/.local/bin/opencode-herdr" "$here/bin/opencode-herdr"
+sync_bin "$HOME/.local/bin/herdr-agent-wrap" "$here/bin/herdr-agent-wrap"
+sync_bin "$HOME/.local/bin/herdr-restore-selftest" "$here/bin/herdr-restore-selftest"
+sync_bin "$agy_home/title.sh" "$here/bin/agy-title"
+sync_bin "$agy_home/restore-hook.py" "$here/restore/agy/restore-hook.py"
+sync_file "$opencode_home/plugins/herdr-app-restore/tui.js" "$here/restore/opencode/tui.js"
+sync_file "$pi_home/extensions/herdr-app-restore.ts" "$here/restore/pi/herdr-app-restore.ts"
+sync_file "$app/restore/shell-hook.sh" "$here/restore/shell-hook.sh"
 
 printf 'synced %s -> %s\n' "$app" "$here"

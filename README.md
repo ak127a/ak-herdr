@@ -43,6 +43,10 @@ needs you.
   and merges a `"title"` command block into `~/.gemini/antigravity-cli/settings.json`
   so Antigravity session names (auto-generated titles, `/resume`, and `/rename`)
   show up live in Herdr's sidebar, tabs, picker, and toasts.
+- **`restore/` & `bin/herdr-agent-wrap`** — automatic session restore across
+  reboots, `herdr-core` crashes, and `hc server stop` for **Antigravity (`agy`)**,
+  **OpenCode (`opencode`)**, and **Pi (`pi`)**. Each agent's restore integration
+  (and the shared shell hook) is only installed if that agent is present on `PATH`.
 
 ## Install
 
@@ -55,12 +59,34 @@ cd ak-herdr
 ```
 
 The script copies `keys.json`, `layouts/tmux.json` and the mods into
-`~/.config/herdr-app` (or `$HERDR_APP_HOME`), and configures `opencode-herdr`
-(into `~/.local/bin`) and `agy-title` + `"title"` (into `~/.gemini/antigravity-cli`
-or `$AGY_HOME`) only for the agents present on `PATH`, keeping anything it replaces
-under `backups/<date>/`. Herdr reads these files live, so a running window
-picks them up, and the script switches it to the `tmux` layout. On a fresh
-machine you can also pick it with `Ctrl+Shift+L` or the command palette.
+`~/.config/herdr-app` (or `$HERDR_APP_HOME`), and configures `opencode-herdr` +
+the OpenCode restore plugin, `agy-title` + the Antigravity restore hook, the Pi
+restore extension, and the interactive shell restore hook only for the agents
+present on `PATH`, keeping anything it replaces under `backups/<date>/`. Herdr
+reads these files live, so a running window picks them up, and the script
+switches it to the `tmux` layout. On a fresh machine you can also pick it with
+`Ctrl+Shift+L` or the command palette.
+
+## Session restore across restarts
+
+When the system reboots or `herdr-core` restarts, `herdr-core` keeps your tabs
+by spawning a fresh interactive shell in each terminal. For any installed agent
+(`agy`, `opencode`, or `pi`), `install.sh` wires up per-terminal markers under
+`~/.local/state/herdr-app/agent-restore/<session>/<terminal-id>`:
+
+- **Clean user exit** removes the marker so the terminal stays a normal shell.
+- **Host shutdown, `herdr-core` crash, or `hc server stop`** keeps the marker,
+  and `~/.config/herdr-app/restore/shell-hook.sh` (sourced from `~/.bashrc` /
+  `~/.zshrc`) automatically resumes the session (`agy --resume <id>`,
+  `opencode-herdr --session <id>`, or `pi --session <file>`).
+
+Verify the restore pipeline in an isolated `herdr-core` session (never touching
+live tabs) with:
+
+```sh
+herdr-restore-selftest        # tests every installed agent (agy, opencode, pi)
+herdr-restore-selftest agy    # or test one: agy | opencode | pi
+```
 
 ## Jump to the agent that needs you
 
@@ -222,6 +248,12 @@ mods/toast-clean/         in-app notifications with live session names
 mods/nvim-popup/          floating Neovim (Alt+E, prefix + e)
 bin/opencode-herdr        one OpenCode session per tab (prefix + Shift+O)
 bin/agy-title             live Antigravity session names in Herdr titles
+bin/herdr-agent-wrap      clean-exit wrapper for agy & opencode restore markers
+bin/herdr-restore-selftest isolated end-to-end restore test (agy, opencode, pi)
+restore/shell-hook.sh     interactive shell hook (wraps + resumes sessions)
+restore/agy/restore-hook.py Antigravity SessionStart/Stop marker hook
+restore/opencode/tui.js   OpenCode TUI plugin for session restore markers
+restore/pi/herdr-app-restore.ts Pi extension for session restore markers
 ```
 
 Shipped Herdr mods (`workspace-chrome`, `pane`, `files`, `changes`)
