@@ -371,17 +371,51 @@ test_pi() {
   local marker="$MARKERS/$addr"
   for _ in $(seq 1 60); do sleep 0.5; [ -f "$marker" ] && break; done
   [ -f "$marker" ] || fail "pi did not record a resume marker at $marker"
-  echo "   pi recorded session: $(head -n 1 "$marker")"
+  local expected_line1 pre_stat
+  expected_line1=$(head -n 1 "$marker")
+  pre_stat=$(python3 -c 'import os,sys; s=os.stat(sys.argv[1]); print(f"{s.st_ino}:{s.st_mtime_ns}")' "$marker")
+  echo "   pi recorded session: $expected_line1"
 
   simulate_reboot "$addr" "$marker"
 
   echo "   restarting isolated core"
   hc server start >/dev/null || fail "could not restart isolated core"
   local resumed
-  resumed=$(wait_for_recovered_cmdline "$addr" "pi" "--session" 0) || true
-  [ -n "$resumed" ] || fail "the recovered shell did not restart pi (marker: $marker)"
+  resumed=$(wait_for_recovered_cmdline "$addr" "pi" "" 0) || true
+  if [ -z "$resumed" ]; then
+    echo "--- debug on failure ---" >&2
+    hc ls --json >&2 || true
+    hc get "$addr" --json >&2 || true
+    ls -la "$MARKERS" >&2 || true
+    cat "$CORE_STATE/core.log" >&2 || true
+    fail "the recovered shell did not restart pi (marker: $marker)"
+  fi
   assert_foreground_not_shell "$addr" "pi"
-  echo "PASS [pi]: recovered pane is running: $resumed"
+
+  # pi 1.6+ overwrites process.title with "pi" (stripping --session from /proc cmdline).
+  # shell-hook.sh removes the old marker before launching `pi --session`, so wait for
+  # herdr-app-restore.ts to freshly re-write the marker with the exact same session path.
+  local verified_session="" cur_stat="" cur_line1=""
+  for _ in $(seq 1 40); do
+    sleep 0.5
+    if [ -f "$marker" ]; then
+      cur_stat=$(python3 -c 'import os,sys; s=os.stat(sys.argv[1]); print(f"{s.st_ino}:{s.st_mtime_ns}")' "$marker" 2>/dev/null || true)
+      cur_line1=$(head -n 1 "$marker" 2>/dev/null || true)
+      if [ -n "$cur_stat" ] && [ "$cur_stat" != "$pre_stat" ] && [ "$cur_line1" = "$expected_line1" ]; then
+        verified_session=1
+        break
+      fi
+    fi
+  done
+  if [ -z "$verified_session" ]; then
+    echo "--- debug on failure ---" >&2
+    hc ls --json >&2 || true
+    hc get "$addr" --json >&2 || true
+    ls -la "$MARKERS" >&2 || true
+    cat "$marker" >&2 || true
+    fail "pi did not refresh marker for $expected_line1 (got: $cur_line1)"
+  fi
+  echo "PASS [pi]: recovered pane is running: $resumed (marker refreshed)"
 }
 
 ran=0
