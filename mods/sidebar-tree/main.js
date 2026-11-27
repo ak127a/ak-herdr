@@ -5,11 +5,12 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import {
-  agents, terminals, focused, spaces, run, theme, shared, setShared,
+  agents, terminals, panes, focused, spaces, run, theme, shared, setShared,
   setAgentOrder, openOverlay, window, layout, notify, nextCommand,
 } from "herdr";
 import { NavigationHistory, AgentHistory } from "./history.js";
 import { TabOrder } from "./tab-order.js";
+import { kidStatus, collectTree, resolveClickAction } from "./nested.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -35,13 +36,6 @@ function toggleSidebar() {
 // after it ("✦  Working", "⠋ - Thinking"), Codex's blinking "[ ! ] " / "[ . ] " mark, and
 // OpenCode's "OC | " window-title prefix.
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}\p{Ps}\p{Pi}]+/u, "").replace(/^OC\s*\|\s*/i, "").replace(/^\[ [!.] \] /, "").trim();
-
-// A sub-agent without a pane isn't in agents(): its raw word, error counting as
-// blocked. It's never done: it reports to its parent, and the parent's done is the news.
-const kidStatus = (k, listed) => {
-  const s = listed.get(k.address) ?? k.status;
-  return s === "error" ? "blocked" : s === "done" ? "idle" : s;
-};
 
 function duration(ms) {
   const m = Math.floor(ms / 60000);
@@ -197,14 +191,7 @@ export default class SidebarTree extends View {
 
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
   tree(all, addr, lead = []) {
-    const kids = all.filter((k) => k.parent === addr && k.state === "live");
-    return kids.flatMap((k, i) => {
-      const last = i === kids.length - 1;
-      return [
-        { t: k, lines: [...lead, last ? "└" : "├"] },
-        ...this.tree(all, k.address, [...lead, last ? "" : "│"]),
-      ];
-    });
+    return collectTree(all, addr, lead);
   }
 
   peek(addr) {
@@ -218,7 +205,7 @@ export default class SidebarTree extends View {
 
   // Pick an agent. Looking at one isn't the agent doing something, so no stamp.
   focusAgent(a) {
-    run("pane.focus", { pane: a.pane });
+    run("pane.focus", a.pane ? { pane: a.pane } : { terminal: a.address });
   }
 
   spaceMenu(s) {
@@ -248,12 +235,18 @@ export default class SidebarTree extends View {
     const sp = spaces();
     const all = terminals();
     const list = agents();
+    const allPanes = panes();
+    const agentByAddress = new Map(list.map((a) => [a.address, a]));
+    const termByAddress = new Map(all.map((t) => [t.address, t]));
+    const paneByTerminal = new Map(allPanes.filter((p) => p.terminal).map((p) => [p.terminal, p]));
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     this.migratePins(all);
     this.track(list, now);
 
     const tabs = new Map(sp.flatMap((s) => s.tabs).map((tab) => [tab.id, tab]));
-    const shown = focused()?.agent;
+    const foc = focused();
+    const shown = foc?.agent ?? null;
+    const focusedTerminal = foc?.shown ?? foc?.terminal ?? null;
 
     // Which space you're looking at, for revealing its row; switching to or
     // clicking a space does not make it count as recently worked in.
@@ -283,10 +276,13 @@ export default class SidebarTree extends View {
       if (tab?.named && tab.name !== prog) return tab.name;
       const live = telling(a);
       if (live) return live;
+      const term = termByAddress.get(a.address);
+      if (term?.name) return term.name;
+      if (term?.template) return term.template;
       if (tab && !/^\d+$/.test(tab.name)) return tab.name;
       return prog || tab?.name || a.address;
     };
-    const names = new Map([...pinned, ...own].map((a) => [a.address, nameOf(a)]));
+    const names = new Map(list.map((a) => [a.address, nameOf(a)]));
     // Two rows reading the same in one space get their tab number to tell them apart.
     const counts = new Map();
     for (const a of own) {
@@ -353,30 +349,30 @@ export default class SidebarTree extends View {
       })
       .child(chevron(open));
 
-    const foldAgent = (a, open) => div()
-      .id(`fold-ag-${a.address}`)
+    const foldAgent = (addr, open, prefix = "ag") => div()
+      .id(`fold-${prefix}-${addr}`)
       .flex_none().flex().items_center().justify_center().rounded(4).p(1)
       .text_color(t.dim).cursor_pointer()
       .hover((el) => el.bg(t.hover).text_color(t.foreground))
       .on_click((_e, cx) => {
         cx.stop_propagation();
-        const key = `a:${a.address}`;
+        const key = `a:${addr}`;
         open ? this.folded.add(key) : this.folded.delete(key);
         this.saveFolded();
         cx.notify();
       })
       .child(chevron(open));
 
-    const pinButton = (a) => {
-      const isPinned = a.pinned;
+    const pinButton = (agent, prefix = "ag") => {
+      const isPinned = agent.pinned;
       return div()
-        .id(`pin-${a.address}`)
+        .id(`pin-${prefix}-${agent.address}`)
         .flex_none().p(2).rounded(4).text_color(t.dim).cursor_pointer()
         .hover((s) => s.bg(t.hover).text_color(t.foreground))
         .tooltip(isPinned ? "Unpin" : "Pin to the top")
         .on_click((_e, cx) => {
           cx.stop_propagation();
-          run("terminal.pin", { terminal: a.address, pinned: !isPinned });
+          run("terminal.pin", { terminal: agent.address, pinned: !isPinned });
           // The row moves away from under the pointer, and no hover-out comes.
           this.hovered = null;
           cx.notify();
@@ -395,6 +391,23 @@ export default class SidebarTree extends View {
       .when(l === "├" || l === "└", (el) => el.child(
         div().absolute().left(4).top(13).w(7).h(1).bg(t.input)));
 
+    const machineBlue = (t.ansi4 ?? MARK.ansi4).slice(0, 7);
+    const machinePill = (name, margin = true) => div()
+      .flex_none()
+      .when(margin, (el) => el.ml(6))
+      .px(6)
+      .h(16)
+      .rounded(999)
+      .bg(`${machineBlue}2e`)
+      .border(1)
+      .border_color(`${machineBlue}55`)
+      .flex()
+      .items_center()
+      .text_size(10)
+      .font_semibold()
+      .text_color(machineBlue)
+      .child(name);
+
     const spaceRow = ({ s, mine }) => {
       const status = s.status ?? null;
       const blocked = mine.some((a) => a.status === "blocked");
@@ -410,7 +423,7 @@ export default class SidebarTree extends View {
         .child(mine.length ? foldSpace(s, open) : div().w(11).flex_none())
         .child(avatar(s))
         .child(div().flex_1().min_w(0).truncate().text_color(s.active ? t.foreground : t.muted).child(s.name))
-        .when(Boolean(s.machine), (el) => el.child(div().flex_none().text_size(10).text_color(t.dim).child(s.machine)))
+        .when(Boolean(s.machine), (el) => el.child(machinePill(s.machine, false)))
         .when(Boolean(branch), (el) => el.child(div().flex_none().max_w(90).truncate().text_size(11).text_color(t.dim).child(branch)))
         .when(mine.length > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(String(mine.length))))
         .when(Boolean(status) && status !== "idle", (el) => el.child(this.status(t, status, true)));
@@ -432,37 +445,46 @@ export default class SidebarTree extends View {
 
     // An agent under a space, or a sub-agent under its parent. `lines`: the tree
     // cells in front of it; `detail`: extra text (a pinned row names its space).
-    const agentRow = (a, lines, detail = null) => {
-      const pic = icon(a.program, 15, t.foreground);
-      const on = a.address === shown;
-      const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
-      const when = this.changed[a.address]?.at ?? tabs.get(a.tab)?.changed_at ?? 0;
-      const idle = a.status === "idle" && !a.focused;
-      const hasSubs = this.tree(all, a.address).length > 0;
-      const subOpen = !this.folded.has(`a:${a.address}`);
+    const agentRow = (item, lines, detail = null, isNested = false) => {
+      const addr = item.address;
+      const agent = agentByAddress.get(addr) ?? null;
+      const term = termByAddress.get(addr) ?? item;
+      const pane = paneByTerminal.get(addr) ?? null;
+      const prefix = isNested ? "sub" : "ag";
+      const hoverKey = `${prefix}:${addr}`;
+      const pic = icon(agent?.program ?? term?.program ?? item.program, 15, t.foreground);
+      const on = addr === shown || Boolean(agent?.focused) || (Boolean(pane) && addr === focusedTerminal);
+      const rowStatus = agent ? agent.status : kidStatus(term, this.listed);
+      const machine = addr.includes("/") ? addr.split("/")[0] : null;
+      const when = this.changed[addr]?.at ?? tabs.get(agent?.tab ?? pane?.tab)?.changed_at ?? 0;
+      const idle = rowStatus === "idle" && !on;
+      const hasSubs = this.tree(all, addr).length > 0;
+      const subOpen = !this.folded.has(`a:${addr}`);
       const indent = lines.length ? 30 + 11 * (lines.length - 1) : 12;
+      const label = names.get(addr) ?? term?.name ?? term?.template ?? agent?.program?.name ?? term?.program?.name ?? addr;
+      const click = resolveClickAction(addr, { agent, pane });
       return h_flex()
-        .id(`ag-${a.address}`)
+        .id(`${prefix}-${addr}`)
         .pl(indent).pr(8).h(26).flex_none().rounded(7).gap(0).items_center().text_size(12.5)
         .when(on, (el) => el.bg(t.raised))
         .hover((s) => s.bg(t.hover))
         .cursor_pointer()
         .on_hover((onHover, cx) => {
-          if (onHover) this.hovered = a.address;
-          else if (this.hovered === a.address) this.hovered = null;
+          if (onHover) this.hovered = hoverKey;
+          else if (this.hovered === hoverKey) this.hovered = null;
           cx.notify();
         })
-        .on_click(() => (this.listed.has(a.address) ? this.focusAgent(a) : this.peek(a.address)))
+        .on_click(() => run(click.command, click.args))
         .children(lines.map(lineCell))
         .when(Boolean(pic), (el) => el.child(div().mr(8).child(pic)))
         .child(div().flex_1().min_w(0).truncate().text_color(idle ? t.muted : t.foreground)
-          .child(names.get(a.address) ?? a.name ?? a.template ?? a.program?.name ?? a.address))
+          .child(label))
         .when(Boolean(detail), (el) => el.child(div().flex_none().pl(6).text_size(11).text_color(t.dim).child(detail)))
-        .when(Boolean(machine), (el) => el.child(div().flex_none().pl(6).text_size(10).text_color(t.dim).child(machine)))
-        .when(this.hovered === a.address, (el) => el.child(pinButton(a)))
-        .when(this.hovered !== a.address && Boolean(when), (el) => el.child(div().flex_none().pl(6).text_size(11).text_color(t.dim).child(duration(now - when))))
-        .when(hasSubs, (el) => el.child(foldAgent(a, subOpen)))
-        .child(this.status(t, this.listed.has(a.address) ? a.status : kidStatus(a, this.listed), Boolean(lines.length > 1)));
+        .when(Boolean(machine), (el) => el.child(machinePill(machine, true)))
+        .when(Boolean(agent) && this.hovered === hoverKey, (el) => el.child(pinButton(agent, prefix)))
+        .when((!agent || this.hovered !== hoverKey) && Boolean(when), (el) => el.child(div().flex_none().pl(6).text_size(11).text_color(t.dim).child(duration(now - when))))
+        .when(hasSubs, (el) => el.child(foldAgent(addr, subOpen, prefix)))
+        .child(this.status(t, rowStatus, Boolean(lines.length > 1)));
     };
 
     const rows = [];
@@ -475,7 +497,11 @@ export default class SidebarTree extends View {
       } else {
         rows.push(div().id("pinned-head").h(22).px(12).flex_none().flex().items_center()
           .text_size(10.5).font_medium().text_color(t.dim).child("Pinned"));
-        for (const a of pinned) rows.push(agentRow(a, [], a.space_name ?? null));
+        for (const a of pinned) {
+          rows.push(agentRow(a, [], a.space_name ?? null, false));
+          if (this.folded.has(`a:${a.address}`)) continue;
+          for (const k of this.tree(all, a.address)) rows.push(agentRow(k.t, k.lines, null, true));
+        }
       }
     }
 
@@ -492,7 +518,7 @@ export default class SidebarTree extends View {
         const last = i === g.mine.length - 1;
         rows.push(agentRow(a, [last ? "└" : "├"]));
         if (this.folded.has(`a:${a.address}`)) return;
-        for (const k of this.tree(all, a.address, [last ? "" : "│"])) rows.push(agentRow(k.t, k.lines));
+        for (const k of this.tree(all, a.address, [last ? "" : "│"])) rows.push(agentRow(k.t, k.lines, null, true));
       });
     }
     this.activeAt = activeAt;
