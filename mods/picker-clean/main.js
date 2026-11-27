@@ -137,6 +137,22 @@ export default class PickerClean extends View {
         : el;
     const visible = (i) => !fixed || (tops[i] + (H[rows[i].kind] ?? 32) > this.scroll && tops[i] < this.scroll + height);
 
+    const machineBlue = (t.ansi4 ?? MARK.ansi4).slice(0, 7);
+    const machinePill = (name) => div()
+      .flex_none()
+      .px(6)
+      .h(16)
+      .rounded(999)
+      .bg(`${machineBlue}2e`)
+      .border(1)
+      .border_color(`${machineBlue}55`)
+      .flex()
+      .items_center()
+      .text_size(10)
+      .font_semibold()
+      .text_color(machineBlue)
+      .child(name);
+
     const row = (r) => {
       if (r.kind === "head") {
         return h_flex()
@@ -148,8 +164,9 @@ export default class PickerClean extends View {
           .text_size(11)
           .font_semibold()
           .text_color(t.dim)
-          .child(h_flex().size(18).rounded(5).bg(spaceColor(t, r.w)).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...r.w.name][0]?.toUpperCase() ?? "?"))
-          .child(r.w.name);
+          .child(h_flex().flex_none().size(18).rounded(5).bg(spaceColor(t, r.w)).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...r.w.name][0]?.toUpperCase() ?? "?"))
+          .child(div().min_w(0).truncate().child(r.w.name))
+          .when(Boolean(r.machine), (el) => el.child(machinePill(r.machine)));
       }
       if (r.kind === "earlier") {
         return h_flex()
@@ -203,6 +220,7 @@ export default class PickerClean extends View {
         .on_click(() => this.go(r))
         .child(this.glyph(t, r.ctx.status))
         .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).when(here, (d) => d.font_semibold()).child(r.name))
+        .when(Boolean(r.machine), (el) => el.child(machinePill(r.machine)))
         .when(r.ctx.status === "blocked", (el) => el.child(div().flex_none().text_size(11).text_color(t.blocked).child("needs you")))
         .when(r.ctx.status === "done", (el) => el.child(div().flex_none().text_size(11).text_color(t.done).child("finished")))
         .when(Boolean(who || r.team), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(who + (r.team ? `  +${r.team}` : ""))));

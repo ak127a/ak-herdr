@@ -49,6 +49,12 @@ export function tabLabel(tab, lead) {
   return (tab.name === prog || !tab.named) && live ? live : base;
 }
 
+export function machineFromId(id) {
+  if (typeof id !== "string") return null;
+  const i = id.indexOf("/");
+  return i > 0 ? id.slice(0, i) : null;
+}
+
 export function buildPickerRows({
   spaces = [],
   agents = [],
@@ -107,6 +113,7 @@ export function buildPickerRows({
   };
 
   const groups = spaces.map((w) => {
+    const spaceMachine = w.machine || machineFromId(w.id) || null;
     const items = (w.tabs ?? []).map((ctx) => {
       const mine = agentsByTab.get(ctx.id) ?? [];
       const tabPanes = panesByTab.get(ctx.id) ?? [];
@@ -118,7 +125,12 @@ export function buildPickerRows({
       } : null);
       const baseName = tabLabel(ctx, lead);
       const titles = mine.map((a) => cleanTitle(a.title)).filter(Boolean);
-      return { w, ctx, mine, baseName, titles, team: teamOf(mine.map((a) => a.address)) };
+      const machine = machineFromId(lead?.terminal)
+        ?? mine.map((a) => machineFromId(a.address)).find(Boolean)
+        ?? tabPanes.map((p) => machineFromId(p.terminal) ?? machineFromId(p.pane)).find(Boolean)
+        ?? machineFromId(ctx.id)
+        ?? spaceMachine;
+      return { w, ctx, mine, baseName, titles, machine, team: teamOf(mine.map((a) => a.address)) };
     });
 
     // Two tabs reading the same in one space (e.g. multiple bash or untitled
@@ -133,12 +145,14 @@ export function buildPickerRows({
 
     const ctxs = items.filter((c) => !f || [
       w.name,
+      spaceMachine ?? "",
+      c.machine ?? "",
       c.name,
       c.ctx.name,
       ...c.mine.map((a) => a.program?.name ?? ""),
       ...c.titles,
     ].join(" ").toLowerCase().includes(f));
-    return { w, ctxs };
+    return { w, machine: spaceMachine, ctxs };
   });
 
   const busy = groups.filter((p) => p.w.status && p.ctxs.length);
@@ -147,7 +161,7 @@ export function buildPickerRows({
 
   const out = [];
   const add = (p) => {
-    out.push({ kind: "head", w: p.w });
+    out.push({ kind: "head", w: p.w, machine: p.machine });
     for (const c of p.ctxs) out.push({ kind: "ctx", ...c });
   };
   busy.forEach(add);
